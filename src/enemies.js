@@ -1,11 +1,14 @@
 import * as THREE from 'three';
 import { createCharacter, animateCharacter, flash } from './character.js';
 
+// leash: distância máxima do ponto de spawn antes de desistir (precisa ser > alcance do maior arco)
 export const TYPES = {
-  slime: { name: 'Slime', hp: 30, dmg: 5, speed: 2.6, xp: 12, gold: [1, 4], aggro: 9, range: 1.7, cd: 1.4, respawn: 15, radius: 0.7, height: 1.2 },
-  goblin: { name: 'Goblin', hp: 75, dmg: 10, speed: 3.9, xp: 32, gold: [4, 10], aggro: 13, range: 2.0, cd: 1.1, respawn: 20, radius: 0.6, height: 2.3 },
-  golem: { name: 'Golem Antigo', hp: 700, dmg: 26, speed: 2.9, xp: 450, gold: [150, 220], aggro: 18, range: 3.8, cd: 2.0, respawn: 60, radius: 1.8, height: 6.3, boss: true },
+  slime: { name: 'Slime', hp: 30, dmg: 5, speed: 2.6, xp: 12, gold: [1, 4], aggro: 9, range: 1.7, cd: 1.4, respawn: 15, radius: 0.7, height: 1.2, leash: 40 },
+  goblin: { name: 'Goblin', hp: 75, dmg: 10, speed: 3.9, xp: 32, gold: [4, 10], aggro: 13, range: 2.0, cd: 1.1, respawn: 20, radius: 0.6, height: 2.3, leash: 45 },
+  golem: { name: 'Golem Antigo', hp: 700, dmg: 26, speed: 2.9, xp: 450, gold: [150, 220], aggro: 18, range: 3.8, cd: 2.0, respawn: 60, radius: 1.8, height: 6.3, boss: true, leash: 60 },
 };
+
+const REGEN_DELAY = 6; // segundos sem levar dano antes de começar a regenerar
 
 const SPAWNS = [
   { type: 'slime', x: -35, z: -35, r: 15, n: 8 },
@@ -105,9 +108,11 @@ export class EnemyManager {
   /** Aplica dano (corpo a corpo ou flecha). Retorna {enemy, dmg, crit, killed}. */
   damage(e, dmg, crit, dir, knock = 0.8) {
     e.hp -= dmg;
+    e.lastHitT = e.t;
     e.flashT = 0.15;
     flash(e.model, 0x880000);
-    e.state = 'chase';
+    // voltando pra casa por ter passado do leash: toma dano, mas não volta a perseguir até chegar
+    if (e.state !== 'return' || !e.leashed) e.state = 'chase';
     e.provokedT = 8; // persegue mesmo se o jogador estiver longe (ex.: atacou com arco)
     if (!e.def.boss && dir) {
       e.pos.x += dir.x * knock;
@@ -155,17 +160,17 @@ export class EnemyManager {
       e.provokedT = Math.max(0, (e.provokedT || 0) - dt);
 
       if (e.state === 'chase') {
-        if (fromSpawn > (def.boss ? 22 : 34) || (dist > def.aggro * 2.2 && e.provokedT <= 0)) e.state = 'return';
+        if (fromSpawn > def.leash) { e.state = 'return'; e.leashed = true; }
+        else if (dist > def.aggro * 2.2 && e.provokedT <= 0) { e.state = 'return'; e.leashed = false; }
         else if (dist > def.range * 0.8) move = new THREE.Vector2(dx, dz);
-        if (dist < def.range && e.atkCd <= 0) {
+        if (e.state === 'chase' && dist < def.range && e.atkCd <= 0) {
           e.atkCd = def.cd; e.attackAnim = 1; e.pendingHit = def.boss ? 0.5 : 0.3;
         }
         e.model.root.rotation.y = Math.atan2(dx, dz);
       } else if (e.state === 'return') {
         move = new THREE.Vector2(e.spawn.x - e.pos.x, e.spawn.z - e.pos.z);
         speed *= 1.4;
-        e.hp = Math.min(def.hp, e.hp + def.hp * 0.5 * dt);
-        if (fromSpawn < 1) e.state = 'idle';
+        if (fromSpawn < 1) { e.state = 'idle'; e.leashed = false; }
       } else {
         e.wanderT -= dt;
         if (e.wanderT <= 0) {
@@ -177,6 +182,10 @@ export class EnemyManager {
       }
 
       e.atkCd -= dt;
+      // regenera só fora de combate: sem levar dano há REGEN_DELAY s e sem estar perseguindo
+      if (e.state !== 'chase' && e.hp < def.hp && e.t - (e.lastHitT ?? -99) > REGEN_DELAY) {
+        e.hp = Math.min(def.hp, e.hp + def.hp * 0.2 * dt);
+      }
       if (e.pendingHit > 0) {
         e.pendingHit -= dt;
         if (e.pendingHit <= 0 && dist < def.range * 1.35) cb.onPlayerHit(def.dmg, e);
