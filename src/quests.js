@@ -1,0 +1,33 @@
+export const QUESTS = [
+  {
+    id: 'slimes', title: 'Praga de Slimes', target: 'slime', count: 5,
+    where: { x: -35, z: -35, label: 'Floresta Sombria' },
+    intro: 'Ah, um aventureiro! Os slimes da Floresta Sombria estão devorando nossas plantações. Derrote 5 deles e eu te recompenso.',
+    progressText: (n, c) => `Slimes derrotados: ${n}/${c}`,
+    doneText: 'Excelente! A floresta já parece mais tranquila. Aqui está sua recompensa.',
+    reward: { xp: 60, gold: 30, potions: 2 },
+  },
+  {
+    id: 'goblins', title: 'Acampamento Goblin', target: 'goblin', count: 4,
+    where: { x: 65, z: -15, label: 'Acampamento Goblin' },
+    intro: 'Goblins montaram um acampamento a leste e estão roubando nossos mercadores. Derrote 4 deles. Cuidado, eles batem forte!',
+    progressText: (n, c) => `Goblins derrotados: ${n}/${c}`,
+    doneText: 'Você é mais forte do que parece! Tome, esta espada era do meu avô.',
+    reward: { xp: 180, gold: 80, weapon: 1 },
+  },
+  {
+    id: 'golem', title: 'O Golem Antigo', target: 'golem', count: 1,
+    where: { x: 0, z: -95, label: 'Ruínas Antigas' },
+    intro: 'Um Golem Antigo despertou nas ruínas ao sul. É ele quem atrai os monstros para cá. Só um herói pode detê-lo. Leve poções!',
+    progressText: (n, c) => `Golem derrotado: ${n}/${c}`,
+    doneText: 'Inacreditável... você derrotou o Golem! A Vila Pedraverde te deve tudo, herói.',
+    reward: { xp: 600, gold: 300, potions: 5 },
+  },
+];
+
+export const WEAPONS = [
+  { name: 'Espada de Madeira', color: 0xa0703a, bonus: 0 },
+  { name: 'Espada de Ferro', color: 0xcfd6de, bonus: 8 },
+  { name: 'Espada de Aço', color: 0x8fb3d9, bonus: 18 },
+  { name: 'Lâmina Rúnica', color: 0x9b6bff, bonus: 32 },
+];

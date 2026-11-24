@@ -1,0 +1,48 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #fff; user-select: none; }
+#app canvas { display: block; }
+.hidden { display: none !important; }
+
+.panel { background: rgba(15, 20, 35, .72); border: 2px solid rgba(255,255,255,.15); border-radius: 10px; padding: 10px 12px; }
+#hud { position: fixed; inset: 0; pointer-events: none; }
+#stats { position: absolute; top: 12px; left: 12px; width: 250px; }
+#stats .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+#stats .row.small { justify-content: flex-start; font-size: 13px; margin: 6px 0 0; }
+.lvl { background: #f5b82e; color: #222; font-weight: 800; padding: 1px 8px; border-radius: 6px; font-size: 13px; }
+
+.bar { position: relative; height: 16px; background: rgba(0,0,0,.55); border-radius: 5px; overflow: hidden; margin-top: 4px; }
+.bar > div { height: 100%; width: 0; transition: width .15s; }
+.bar span { position: absolute; inset: 0; font-size: 11px; line-height: 16px; text-align: center; font-weight: 700; text-shadow: 0 1px 2px #000; }
+.bar.hp > div { background: linear-gradient(#ff5d5d, #c62828); }
+.bar.xp { height: 10px; } .bar.xp span { line-height: 10px; font-size: 9px; }
+.bar.xp > div { background: linear-gradient(#6fd0ff, #2a7fd4); }
+
+#quest { position: absolute; top: 12px; right: 194px; width: 250px; font-size: 13px; }
+#quest h3 { margin: 0 0 4px; font-size: 14px; color: #f5b82e; }
+#quest p { margin: 2px 0; opacity: .9; }
+#minimap { position: absolute; top: 12px; right: 12px; border-radius: 50%; border: 3px solid rgba(255,255,255,.35); background: rgba(20,40,20,.7); }
+
+#bossbar { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); width: 420px; text-align: center; font-weight: 800; text-shadow: 0 2px 3px #000; }
+.bar.boss { height: 14px; border: 2px solid #000; }
+.bar.boss > div { background: linear-gradient(#b46bff, #6a1fb8); }
+
+#prompt { position: fixed; bottom: 120px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.65); padding: 8px 16px; border-radius: 8px; font-weight: 700; }
+#log { position: fixed; bottom: 40px; left: 12px; width: 360px; font-size: 13px; display: flex; flex-direction: column; gap: 3px; pointer-events: none; }
+#log div { background: rgba(0,0,0,.45); padding: 3px 8px; border-radius: 5px; transition: opacity .6s; }
+#log .good { color: #9cff8f; } #log .bad { color: #ff8b8b; } #log .gold { color: #ffd65c; } #log .info { color: #9fd8ff; }
+
+#floats { position: fixed; inset: 0; pointer-events: none; }
+.float { position: absolute; font-weight: 900; font-size: 20px; transform: translate(-50%, -50%); text-shadow: 0 2px 0 #000, 0 0 4px #000; white-space: nowrap; }
+
+#dialog { position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); width: min(620px, 92vw); background: rgba(20, 22, 40, .92); border: 3px solid #f5b82e; border-radius: 12px; padding: 16px 20px; }
+#dtitle { font-weight: 800; color: #f5b82e; margin-bottom: 8px; font-size: 17px; }
+#dtext { line-height: 1.45; margin-bottom: 12px; }
+#dbuttons { display: flex; gap: 8px; flex-wrap: wrap; }
+button { font: inherit; font-weight: 700; padding: 8px 14px; border-radius: 8px; border: 0; background: #3b82f6; color: #fff; cursor: pointer; box-shadow: 0 3px 0 #1d4ed8; }
+button:hover { filter: brightness(1.1); }
+button.secondary { background: #555; box-shadow: 0 3px 0 #333; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+
+#death { position: fixed; inset: 0; background: rgba(80, 0, 0, .55); display: flex; flex-direction: column; align-items: center; justify-content: center; }
+#death h1 { font-size: 56px; margin: 0; text-shadow: 0 4px 0 #000; }
+#help { position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%); font-size: 12px; opacity: .8; background: rgba(0,0,0,.4); padding: 4px 10px; border-radius: 6px; white-space: nowrap; }

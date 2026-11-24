@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BlockQuest RPG</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="hud">
+    <div class="panel" id="stats">
+      <div class="row"><b id="pname">Aventureiro</b> <span class="lvl">Nv <span id="level">1</span></span></div>
+      <div class="bar hp"><div id="hpfill"></div><span id="hptext"></span></div>
+      <div class="bar xp"><div id="xpfill"></div><span id="xptext"></span></div>
+      <div class="row small">🪙 <span id="gold">0</span> &nbsp; 🧪 <span id="potions">0</span> &nbsp; ⚔️ <span id="weapon"></span></div>
+    </div>
+    <div class="panel" id="quest"></div>
+    <canvas id="minimap" width="170" height="170"></canvas>
+  </div>
+
+  <div id="bossbar" class="hidden"><div id="bossname"></div><div class="bar boss"><div id="bossfill"></div></div></div>
+  <div id="prompt" class="hidden"></div>
+  <div id="log"></div>
+  <div id="floats"></div>
+
+  <div id="dialog" class="hidden">
+    <div id="dtitle"></div>
+    <div id="dtext"></div>
+    <div id="dbuttons"></div>
+  </div>
+
+  <div id="death" class="hidden">
+    <h1>Você caiu!</h1>
+    <p>Perdeu 10% do seu ouro.</p>
+    <button id="respawn">Renascer na vila</button>
+  </div>
+
+  <div id="help">WASD mover · Shift correr · Espaço pular · Clique/F atacar · Botão direito + arrastar câmera · Scroll zoom · E falar · 1 poção</div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
