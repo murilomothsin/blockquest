@@ -24,6 +24,7 @@ export const HP_PER_LEVEL = 15;
 export const DROP_EVERY = 5; // a cada 5 abates cai um baú
 export const DEATH_STEP = 0.1; // cada morte no período tira +10% do ouro (10%, 20%, 30%...)
 export const DEATH_PERIOD_MS = 2 * 86400_000; // zera a cada 2 dias, à meia-noite UTC
+export const NOVICE_MAX_LEVEL = 3; // proteção de novato: até este nível, morrer não tira os itens
 export const LOOT_TTL = 300; // s até o baú sumir
 export const LOOT_REACH = 3.5; // distância máxima para pegar (servidor; o cliente encosta a 1.8 m)
 export const MAX_LEVEL = 99;
@@ -136,6 +137,9 @@ export function gainXp(c, n, fx) {
     fx.push({ k: 'log', text: `Você subiu para o nível ${c.level}! Vida máxima: ${c.maxHp}`, cls: 'good' });
     if (c.level === CLASS_LEVEL && !c.cls) fx.push({ k: 'log', text: '⭐ Você já pode escolher sua classe! Aperte K.', cls: 'good' }, { k: 'chooseClass' });
     else if (c.cls) fx.push({ k: 'log', text: '⭐ +1 ponto de habilidade (K para abrir a árvore).', cls: 'good' });
+    if (c.level === NOVICE_MAX_LEVEL + 1) {
+      fx.push({ k: 'log', text: '⚠️ Fim da proteção de novato: agora, ao morrer, você perde tudo o que carrega. Guarde um equipamento reserva no armário da sua casa!', cls: 'bad' });
+    }
   }
 }
 
@@ -225,10 +229,14 @@ export function hurt(c, dmg, type, ctx, fx) {
     const pct = Math.min(100, Math.round(c.deaths.n * DEATH_STEP * 100));
     const lost = Math.floor((c.gold * pct) / 100);
     c.gold -= lost;
-    const items = Object.values(c.inv).reduce((s, n) => s + n, 0) - (c.inv.wood_sword && c.equipped === 'wood_sword' ? 1 : 0);
-    c.inv = { wood_sword: 1 };
-    c.equipped = 'wood_sword'; c.armor = null; c.helmet = null;
-    fx.push({ k: 'death', by: TYPES[type]?.name || 'um monstro', lost, pct, items: Math.max(0, items), resetAt: (period + 1) * DEATH_PERIOD_MS });
+    const novice = c.level <= NOVICE_MAX_LEVEL;
+    let items = 0;
+    if (!novice) { // perde tudo o que carrega
+      items = Object.values(c.inv).reduce((s, n) => s + n, 0) - (c.inv.wood_sword && c.equipped === 'wood_sword' ? 1 : 0);
+      c.inv = { wood_sword: 1 };
+      c.equipped = 'wood_sword'; c.armor = null; c.helmet = null;
+    }
+    fx.push({ k: 'death', by: TYPES[type]?.name || 'um monstro', lost, pct, items: Math.max(0, items), novice, resetAt: (period + 1) * DEATH_PERIOD_MS });
   }
   return real;
 }

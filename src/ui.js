@@ -3,6 +3,7 @@ import { ZONES, WORLD_RADIUS } from './world.js';
 import { ITEMS, SHOP, CATEGORIES, category, itemStats, damageReduction } from './items.js';
 import { ACTIONS, RESERVED, keyLabel } from './input.js';
 import { roleOf } from './shared/roles.js';
+import { NOVICE_MAX_LEVEL } from './shared/progress.js';
 import { BIOMES, biomeBlend, MINE, MINE_GRID, HOME_FURNITURE, inMine, inHome } from './shared/worldData.js';
 import {
   CLASSES, CLASS_IDS, CLASS_LEVEL, TREES, SKILLS, RESPEC_COST, skillPointsFree, skillPointsTotal, canRaise, statsOf, activeSkillOf,
@@ -323,7 +324,9 @@ export class UI {
     if (!info) return;
     box.append(
       h('p', {}, `Derrotado por ${info.by}.`),
-      h('p', { class: 'bad' }, info.items ? `Você perdeu tudo o que carregava (${info.items} ${info.items > 1 ? 'itens' : 'item'}).` : 'Você não carregava itens.'),
+      info.novice
+        ? h('p', { class: 'good' }, `🛡️ Proteção de novato: até o nível ${NOVICE_MAX_LEVEL} você não perde os itens. A partir do nível ${NOVICE_MAX_LEVEL + 1}, morrer tira tudo o que você carrega.`)
+        : h('p', { class: 'bad' }, info.items ? `Você perdeu tudo o que carregava (${info.items} ${info.items > 1 ? 'itens' : 'item'}).` : 'Você não carregava itens.'),
       h('p', { class: 'bad' }, `−${info.lost} 🪙 (${info.pct}% do ouro na mão)`),
       h('p', { class: 'tip' }, `A próxima morte custa ${info.nextPct}%. O contador zera em ${fmtTime(info.resetAt - Date.now())} (meia-noite UTC, a cada 2 dias).`),
       h('p', { class: 'tip' }, '💡 Guarde equipamento no armário, poções no baú e ouro no cofre da sua casa: o que está lá nunca se perde.'),

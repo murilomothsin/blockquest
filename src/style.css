@@ -188,6 +188,7 @@ button.keycap-btn.listening { background: #f5b82e; animation: pulse .8s infinite
 /* ---------- morte ---------- */
 #deathinfo p { margin: 6px 0; }
 #deathinfo .bad { color: #ff8a80; font-weight: 700; }
+#deathinfo .good { color: #9cff8f; font-weight: 700; max-width: 520px; }
 #deathinfo .tip { font-size: 14px; opacity: .85; max-width: 520px; }
 
 /* ---------- janelas novas ---------- */

@@ -176,6 +176,15 @@ ok(f2[0] && f2.find((f) => f.k === 'death').pct === 20, `2ª morte no mesmo per�
 const f3 = []; const sim2 = { ...sim, dead: false, hp: 10 }; hurt(sim2, 99999, 'zombie', { clock: Date.now() + 3 * 86400_000 }, f3);
 ok(f3.find((f) => f.k === 'death').pct === 10, 'depois do reset (2 dias, meia-noite UTC) volta para 10%');
 
+// proteção de novato (regra compartilhada; online roda igual no servidor)
+const nov = { level: 3, gold: 100, hp: 5, maxHp: 130, inv: { iron_sword: 1, potion: 2, leather_armor: 1 }, equipped: 'iron_sword', armor: 'leather_armor', helmet: null, deaths: { period: 0, n: 0 } };
+const fn = []; hurt(nov, 9999, 'goblin', { clock: Date.now(), rand: () => 0.99 }, fn);
+const dn = fn.find((f) => f.k === 'death');
+ok(dn?.novice && nov.inv.iron_sword === 1 && nov.equipped === 'iron_sword' && nov.armor === 'leather_armor' && nov.gold === 90, `nível 3 morre e mantém os itens (${JSON.stringify(nov.inv)}), ouro 100 → ${nov.gold}`);
+const vet = { ...nov, level: 4, dead: false, hp: 5, gold: 100, inv: { iron_sword: 1, potion: 2 }, equipped: 'iron_sword', deaths: { period: 0, n: 0 } };
+const fv = []; hurt(vet, 9999, 'goblin', { clock: Date.now(), rand: () => 0.99 }, fv);
+ok(!fv.find((f) => f.k === 'death').novice && JSON.stringify(vet.inv) === '{"wood_sword":1}', 'nível 4 já perde tudo');
+
 A.ws.close(); B.ws.close();
 await sleep(300);
 for (const n of ['t_a', 't_b']) {

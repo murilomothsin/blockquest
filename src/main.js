@@ -183,7 +183,7 @@ function applyFx(list = []) {
         player.dead = true;
         sfx('playerDie');
         lockTarget = null;
-        ui.log(`Você foi derrotado por ${f.by}.${f.lost ? ` Perdeu ${f.lost} 🪙.` : ''}${f.items ? ` Perdeu ${f.items} item(ns).` : ''}`, 'bad');
+        ui.log(`Você foi derrotado por ${f.by}.${f.lost ? ` Perdeu ${f.lost} 🪙.` : ''}${f.items ? ` Perdeu ${f.items} item(ns).` : ''}${f.novice ? ' 🛡️ Itens protegidos (novato).' : ''}`, 'bad');
         ui.closeDialog(); ui.closeModal();
         ui.death(true, () => request({ a: 'respawn' }), f.pct != null ? { ...f, nextPct: nextDeathPct(player) } : null);
         gearChanged = true;

@@ -168,7 +168,7 @@ Cada classe tem uma árvore de 5 nós: 3 de atributos (até 3 pontos), a habilid
 A casa com a porta dourada, ao lado do poço, é a sua (E para entrar). Por dentro é **privada**: cada jogador vê só a própria (os outros não te veem lá). Móveis: **Armário de Armas** (armas, armaduras, elmos), **Baú** (poções), **Cofre** (ouro) e **Espelho** (personalização, em breve).
 
 ### Morte
-Ao morrer você **perde tudo o que carrega** (volta com uma Espada de Madeira) e uma parte do **ouro na mão**: 10% na 1ª morte, 20% na 2ª, 30% na 3ª... O contador zera **a cada 2 dias, à meia-noite UTC**. O que está guardado em casa nunca se perde — a ideia é que a casa vire o "banco" e o armário guarde um equipamento reserva.
+Ao morrer você **perde tudo o que carrega** (volta com uma Espada de Madeira) e uma parte do **ouro na mão**: 10% na 1ª morte, 20% na 2ª, 30% na 3ª... O contador zera **a cada 2 dias, à meia-noite UTC**. **Proteção de novato:** até o nível 3 a morte não tira os itens (só a parte do ouro); ao chegar no nível 4 o jogo avisa que a proteção acabou. O que está guardado em casa nunca se perde — a ideia é que a casa vire o "banco" e o armário guarde um equipamento reserva.
 
 ### Balanceamento
 `node scripts/balance.mjs` simula, com as mesmas regras do jogo, dano por segundo de cada classe por nível, tempo para matar cada monstro, vida perdida em cada sala da mina, economia e custo da morte. Progressão típica: missão dos goblins no Nv3, Golem no Nv5, biomas no Nv6–7, mina no **Nv8**, saída da mina no Nv9.
