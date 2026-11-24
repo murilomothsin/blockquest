@@ -23,10 +23,13 @@ import { startSession, logoutSession } from './net/session.js';
 import { Net } from './net/net.js';
 import { RemotePlayers } from './net/remote.js';
 import { Bubbles } from './net/bubble.js';
+import { TouchControls, isTouchDevice } from './touch.js';
+
+const TOUCH = isTouchDevice();
 
 // ---------- Render ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, TOUCH ? 1.5 : 2)); // celular: menos pixels = mais FPS e menos bateria
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -50,7 +53,7 @@ const lantern = new THREE.PointLight(0xffd9a0, 0, 18, 1.3);
 scene.add(lantern);
 const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(TOUCH ? 1024 : 2048, TOUCH ? 1024 : 2048);
 Object.assign(sun.shadow.camera, { left: -45, right: 45, top: 45, bottom: -45, near: 1, far: 150 });
 sun.shadow.bias = -0.0005;
 scene.add(sun, sun.target);
@@ -641,6 +644,15 @@ if (session.online) {
   ui.setAccount('Aventureiro (offline)', false);
 }
 addEventListener('beforeunload', save); // offline: salva ao fechar (online não faz nada)
+addEventListener('pagehide', save); // celular: o navegador pode matar a aba sem beforeunload
+
+// ---------- Celular / tablet: controles na tela ----------
+const touch = TOUCH ? new TouchControls(input, renderer.domElement, {
+  online: !!net,
+  onChat: () => sendChat && ui.openChat((text) => sendChat(text)),
+  onInventory: () => !player.dead && ui.toggleModal('inventory'),
+  onTree: () => !player.dead && ui.toggleModal(player.cls ? 'tree' : 'class'),
+}) : null;
 
 // ---------- Câmera ----------
 const cam = { yaw: 0, pitch: 0.38, dist: 13 };
@@ -656,7 +668,7 @@ function update(dt) {
   const t = player.t;
 
   // câmera
-  if (input.rmb) {
+  if (input.rmb || input.touchCam) {
     cam.yaw -= input.dx * 0.005;
     cam.pitch = THREE.MathUtils.clamp(cam.pitch + input.dy * 0.004, 0.05, 1.35);
   }
@@ -691,11 +703,16 @@ function update(dt) {
     if (input.down('KeyS') || input.down('ArrowDown')) mv.sub(fwd);
     if (input.down('KeyD') || input.down('ArrowRight')) mv.add(right);
     if (input.down('KeyA') || input.down('ArrowLeft')) mv.sub(right);
+    let analog = 1;
+    if (input.move) { // joystick na tela: direção e força (empurrar pouco = andar devagar)
+      mv.set(0, 0, 0).addScaledVector(fwd, -input.move.y).addScaledVector(right, input.move.x);
+      analog = Math.min(1, 0.35 + input.move.mag);
+    }
     if (mv.lengthSq() > 0) {
       mv.normalize();
       const run = input.held('run');
-      player.pos.addScaledVector(mv, (run ? 13 : 8) * statsOf(player).speed * dt);
-      moveAmount = run ? 1 : 0.75;
+      player.pos.addScaledVector(mv, (run ? 13 : 8) * analog * statsOf(player).speed * dt);
+      moveAmount = run ? 1 : 0.75 * analog;
       let diff = Math.atan2(mv.x, mv.z) - player.rotY;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       player.rotY += diff * Math.min(1, dt * 14);
@@ -715,8 +732,9 @@ function update(dt) {
   }
 
   // coisa mais próxima para interagir (NPC, poço, portas, móveis da casa, baús de tesouro)
-  const talkKey = keyLabel(input.bindings.talk.find(Boolean));
+  const talkKey = TOUCH ? '✋' : keyLabel(input.bindings.talk.find(Boolean));
   const it = canAct ? nearestInteractable() : null;
+  touch?.update({ canTalk: it?.run, potions: player.inv.potion || 0, ranged: weapon().style !== 'melee' && weapon().style, blocked: ui.isBlocking(), dead: player.dead });
   ui.prompt(it ? (it.run ? `[${talkKey}] ${it.label}` : it.label) : null);
   if (it?.run && input.hit('talk')) it.run();
 

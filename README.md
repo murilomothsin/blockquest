@@ -126,6 +126,23 @@ Todos os controles de ação podem ser remapeados no jogo (painel **Controles �
 | Mostrar/ocultar controles | H |
 | Soltar alvo / fechar janela | Esc |
 
+### Celular e tablet
+Em telas de toque os controles aparecem sozinhos (no PC dá para testar com `?touch=1` na URL):
+
+| Na tela | Faz |
+|---|---|
+| Polegar na metade esquerda | joystick (aparece onde você encosta). Empurrar pouco = andar devagar; até a borda = correr |
+| Arrastar no resto da tela | girar a câmera · dois dedos (pinça) = zoom |
+| Toque rápido num monstro | travar o alvo |
+| ⚔️ (segurar continua atacando) · ⤒ Pular · 🎯 Alvo · 🧪 Poção | ações |
+| ✋ Usar | falar, loja, poço, portas, móveis, baús (acende verde quando tem algo perto) |
+| Botão da habilidade | habilidade da classe (G) |
+| 🎒 ⭐ 💬 ⛶ (topo) | inventário, classe/habilidades, chat (online), tela cheia |
+
+Os controles somem enquanto uma janela está aberta. No celular o jogo usa menos resolução e sombras menores (mais FPS e bateria). Melhor deitado — em pé aparece um aviso.
+
+**Testar no seu celular (mesmo Wi-Fi):** `npm run dev:celular` e abra no celular o endereço `Network:` que o Vite mostra (ex.: `http://192.168.x.x:5199`).
+
 ## Mecânicas
 
 - **Mira:** assistida, com anel amarelo no alvo automático do arco e anel vermelho no alvo travado (clique ou Tab). As flechas fazem uma leve curva até o alvo travado.
@@ -213,7 +230,8 @@ src/
   loot.js        baús de drop e pilhas de moedas
   audio.js       sons sintetizados / arquivos opcionais
   ui.js          HUD, loja, inventário, classe/árvore, casa, morte, chat, minimapa (biomas/mina)
-  input.js       teclado/mouse com bindings configuráveis
+  input.js       teclado/mouse com bindings configuráveis (+ ações virtuais do toque)
+  touch.js       controles de toque: joystick, botões, câmera por arraste, pinça
 ```
 
 ## Próximos passos

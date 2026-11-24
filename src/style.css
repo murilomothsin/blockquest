@@ -225,3 +225,74 @@ button.keycap-btn.listening { background: #f5b82e; animation: pulse .8s infinite
 #modal.class, #modal.tree { width: min(980px, 96vw); }
 
 #region { position: fixed; top: 192px; right: 14px; width: 170px; }
+
+/* ================= Celular / tablet (body.touch) ================= */
+body.touch { overscroll-behavior: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+body.touch #controls { display: none !important; }
+#touch { position: fixed; inset: 0; pointer-events: none; z-index: 8; }
+#touch .joy { position: fixed; width: 124px; height: 124px; margin: -62px 0 0 -62px; border-radius: 50%;
+  background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.35); }
+#touch .knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%;
+  background: rgba(255,255,255,.55); box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+.tpad { position: fixed; right: calc(14px + env(safe-area-inset-right)); bottom: calc(14px + env(safe-area-inset-bottom)); width: 230px; height: 200px; pointer-events: none; }
+.tbtn { position: absolute; pointer-events: auto; touch-action: none; border-radius: 50%; padding: 0; width: 58px; height: 58px;
+  background: rgba(20,24,34,.62); border: 2px solid rgba(255,255,255,.35); color: #fff; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; line-height: 1; }
+.tbtn .ti { font-size: 24px; }
+.tbtn small { font-size: 9px; margin-top: 2px; opacity: .85; }
+.tbtn.on { background: rgba(245,184,46,.55); transform: scale(.94); }
+.tbtn.big { width: 92px; height: 92px; right: 0; bottom: 0; border-color: #f5b82e; }
+.tbtn.big .ti { font-size: 40px; }
+.tbtn.jump { right: 104px; bottom: 0; }
+.tbtn.talk { right: 0; bottom: 104px; }
+.tbtn.talk.glow { border-color: #9cff8f; background: rgba(60,140,60,.65); animation: pulse 1.2s ease-in-out infinite; }
+.tbtn.target { right: 96px; bottom: 76px; width: 50px; height: 50px; }
+.tbtn.potion { right: 166px; bottom: 10px; width: 50px; height: 50px; }
+.tbtn.potion::after { content: attr(data-n); position: absolute; right: -2px; bottom: -2px; background: #c62828; border-radius: 9px; font-size: 11px; font-weight: 800; padding: 1px 6px; }
+.tbtn.potion.empty { opacity: .45; }
+.ttop { position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; gap: 8px; pointer-events: auto; }
+.tsmall { width: 44px; height: 44px; border-radius: 12px; padding: 0; font-size: 22px; background: rgba(20,24,34,.62); border: 2px solid rgba(255,255,255,.3); touch-action: none; }
+body.touch #skillbtn { left: auto; right: calc(250px + env(safe-area-inset-right)); bottom: calc(22px + env(safe-area-inset-bottom)); transform: none; width: 60px; height: 60px; pointer-events: auto; touch-action: none; }
+body.touch #skillbtn .skey { display: none; }
+body.touch #prompt { bottom: auto; top: 64px; font-size: 14px; }
+
+/* telas pequenas (celular deitado ~ 844x390, em pé ~ 390x844): HUD compacto */
+@media (max-width: 950px), (max-height: 500px) {
+  #stats { width: 190px; padding: 6px 8px; top: calc(6px + env(safe-area-inset-top)); left: calc(6px + env(safe-area-inset-left)); font-size: 12px; }
+  #stats .row { margin-bottom: 3px; }
+  #stats .row.small { font-size: 11px; margin-top: 3px; }
+  #stats #defense, #stats #weapon { display: none; }
+  #quest { width: 180px; right: 116px; top: 6px; font-size: 11px; padding: 6px 8px; }
+  #quest h3 { font-size: 12px; }
+  #quest p:nth-child(n+3) { display: none; }
+  #minimap { width: 104px; height: 104px; top: 6px; right: calc(6px + env(safe-area-inset-right)); }
+  #region { top: 112px; right: 6px; width: 104px; font-size: 10px; }
+  #log { width: 260px; font-size: 11px; bottom: auto; top: 150px; left: 6px; }
+  #log div:nth-last-child(n+4) { display: none; }
+  #bossbar { width: 260px; top: 58px; font-size: 13px; }
+  #chat { width: 280px; left: 6px; bottom: auto; top: 150px; font-size: 12px; }
+  #account { top: auto; bottom: 6px; left: 50%; transform: translateX(-50%); font-size: 11px; }
+  #modal { width: 98vw !important; max-height: 94vh; padding: 10px; }
+  .grid { grid-template-columns: 1fr !important; }
+  .classes { grid-template-columns: 1fr 1fr; }
+  .cols { grid-template-columns: 1fr; }
+  .node { width: 150px; }
+  .trow { flex-wrap: wrap; }
+  #dialog { bottom: 8px; padding: 10px 14px; }
+  #death h1 { font-size: 36px; }
+  #deathinfo { font-size: 13px; padding: 0 12px; }
+  .lbox { transform: scale(.85); }
+}
+/* celular em pé: avisa que deitado é melhor */
+#rotate { display: none; }
+@media (orientation: portrait) and (max-width: 600px) {
+  body.touch #rotate { display: block; position: fixed; left: 50%; bottom: 236px; transform: translateX(-50%); background: rgba(0,0,0,.65);
+    padding: 6px 12px; border-radius: 8px; font-size: 12px; z-index: 9; pointer-events: none; white-space: nowrap; }
+  body.touch #quest { display: none; }
+}
+body.touch.touch-hidden #skillbtn { display: none; }
+body.touch #mclose { width: 48px; height: 44px; font-size: 22px; }
+@media (orientation: portrait) and (max-width: 600px) {
+  .ttop { left: auto; right: calc(6px + env(safe-area-inset-right)); transform: none; top: 140px; flex-direction: column; }
+  #region { top: 112px; }
+}

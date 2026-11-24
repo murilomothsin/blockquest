@@ -15,7 +15,8 @@
     "test:chat": "node scripts/test-chat.mjs",
     "test:server": "node --disable-warning=ExperimentalWarning scripts/test-server.mjs",
     "test:mina": "node --disable-warning=ExperimentalWarning scripts/test-mina.mjs",
-    "balance": "node scripts/balance.mjs"
+    "balance": "node scripts/balance.mjs",
+    "dev:celular": "node scripts/dev.js --host --port 5199"
   },
   "engines": {
     "node": ">=22.13"

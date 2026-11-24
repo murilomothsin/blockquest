@@ -48,6 +48,11 @@ export class Input {
     this.pressed = new Set();
     this.dx = 0; this.dy = 0; this.wheel = 0;
     this.rmb = false;
+    // toque (src/touch.js): ações virtuais, joystick analógico e câmera por arraste
+    this.vheld = new Set();
+    this.vpressed = new Set();
+    this.move = null; // { x, y, mag } do joystick (y para baixo = para trás)
+    this.touchCam = false;
     this.click = null; // {x, y} do último clique esquerdo no canvas
     this.capture = null;
     this.swallowClick = false;
@@ -99,9 +104,14 @@ export class Input {
   isBound(code) { return Object.values(this.bindings).some((b) => b.includes(code)); }
 
   /** ação mantida pressionada */
-  held(action) { return this.bindings[action].some((c) => c && this.keys.has(c)); }
-  /** ação pressionada neste frame */
-  hit(action) { return this.bindings[action].some((c) => c && this.pressed.has(c)); }
+  held(action) { return this.vheld.has(action) || this.bindings[action].some((c) => c && this.keys.has(c)); }
+  /** ação pressionada neste frame (segurar o botão de ataque na tela continua atacando) */
+  hit(action) {
+    return this.vpressed.has(action) || (action === 'attack' && this.vheld.has('attack'))
+      || this.bindings[action].some((c) => c && this.pressed.has(c));
+  }
+  pressVirtual(action) { this.vpressed.add(action); this.vheld.add(action); }
+  releaseVirtual(action) { this.vheld.delete(action); }
   /** tecla física (movimento fixo) */
   down(code) { return this.keys.has(code); }
   tapped(code) { return this.pressed.has(code); }
@@ -129,6 +139,7 @@ export class Input {
 
   endFrame() {
     this.pressed.clear();
+    this.vpressed.clear();
     this.dx = 0; this.dy = 0; this.wheel = 0; this.click = null;
   }
 }
