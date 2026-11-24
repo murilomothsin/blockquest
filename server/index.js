@@ -125,7 +125,7 @@ const findOnline = (name) => [...players.values()].find((p) => p.name.toLowerCas
 const f = (v, lim = 1e4) => (Number.isFinite(v) ? Math.max(-lim, Math.min(lim, v)) : 0);
 /** só posição e animação vêm do cliente; arma/vida/nível o servidor preenche (game.handleState) */
 const cleanState = (m) => ({
-  x: f(m.x, 700), y: f(m.y, 100), z: f(m.z, 700), // mina e casa ficam em x 400–520 (fora do mapa visível) r: f(m.r, 100), m: f(m.m, 1), air: !!m.air, s: Math.trunc(f(m.s, 1e9)),
+  x: f(m.x, 1000), y: f(m.y, 100), z: f(m.z, 1000), // mina, torre e casa ficam em x 400–690 (fora do mapa visível) r: f(m.r, 100), m: f(m.m, 1), air: !!m.air, s: Math.trunc(f(m.s, 1e9)),
 });
 
 wss.on('connection', (ws) => {

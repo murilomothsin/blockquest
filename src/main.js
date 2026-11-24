@@ -6,10 +6,11 @@ import { QUESTS } from './quests.js';
 import { ITEMS, ATTACK, SLOTS } from './items.js';
 import {
   newCharacter, normalizeCharacter, publicCharacter, LootBag, act, kill, hurt, xpToNext,
-  weaponOf, defenseOf, isEquipped as isEquippedBy, nextDeathPct, treasureLeft,
+  weaponOf, defenseOf, isEquipped as isEquippedBy, nextDeathPct, treasureLeft, questGiver,
 } from './shared/progress.js';
 import {
-  NPCS, WELL, INTERACT_RANGE, TREASURES, MINE_DOOR, MINE_EXIT, HOME_DOOR, HOME_EXIT, HOME_FURNITURE, regionAt, biomeAt, BIOMES,
+  NPCS, WELLS, INTERACT_RANGE, TREASURES, MINE_DOOR, MINE_EXIT, HOME_DOOR, HOME_EXIT, HOME_FURNITURE, regionAt, biomeAt, BIOMES,
+  DOORS, DOOR_BY_ID, BOSS_ROOMS, dungeonAt, isDungeonRegion, TOWER_DOOR,
 } from './shared/worldData.js';
 import { CLASSES, SKILLS, statsOf, activeSkillOf } from './shared/classes.js';
 import { attackCooldown, weaponRange } from './shared/combatRules.js';
@@ -127,7 +128,7 @@ const isEquipped = (id) => isEquippedBy(player, id);
 const facing = () => new THREE.Vector3(Math.sin(player.rotY), 0, Math.cos(player.rotY));
 const headPos = (p, hgt = 2.8) => new THREE.Vector3(p.x, hgt, p.z);
 const distXZ = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
-const CHAR_KEYS = ['level', 'xp', 'gold', 'maxHp', 'hp', 'kills', 'inv', 'equipped', 'armor', 'helmet', 'quest', 'cls', 'skills', 'chests', 'home', 'deaths'];
+const CHAR_KEYS = ['level', 'xp', 'gold', 'maxHp', 'hp', 'kills', 'inv', 'equipped', 'armor', 'helmet', 'quest', 'cls', 'skills', 'chests', 'home', 'deaths', 'buffs'];
 /** personagem vindo do servidor substitui o local */
 function applyChar(c) {
   if (!c) return;
@@ -208,6 +209,7 @@ function applyFx(list = []) {
       case 'chooseClass': break; // o HUD mostra o botão "Escolher classe"
       case 'classChosen': ui.closeModal(); ui.openModal('tree'); break;
       case 'skillUp': break;
+      case 'buff': player.buffs = { ...(player.buffs || {}), [f.id]: f.until }; break;
       default: break;
     }
   }
@@ -234,12 +236,16 @@ ui.setGame({
 });
 
 // ---------- NPCs ----------
-const npcs = [
-  { id: 'elder', name: NPCS.elder.name, pos: new THREE.Vector3(NPCS.elder.x, 0, NPCS.elder.z), look: { shirt: 0x6b4fa0, pants: 0x3d2a5c, hair: 0xe8e8e8 } },
-  { id: 'merchant', name: NPCS.merchant.name, pos: new THREE.Vector3(NPCS.merchant.x, 0, NPCS.merchant.z), look: { shirt: 0xe0a72e, pants: 0x5a3d1f, hair: 0x8a3b12 } },
-];
+const NPC_LOOKS = {
+  elder: { shirt: 0x6b4fa0, pants: 0x3d2a5c, hair: 0xe8e8e8 },
+  merchant: { shirt: 0xe0a72e, pants: 0x5a3d1f, hair: 0x8a3b12 },
+  captain: { shirt: 0x3b5fb5, pants: 0x2b3a67, hair: 0x8a3b12, gear: { armorColor: 0xcfd6de, helmetColor: 0xcfd6de } },
+  smith: { shirt: 0x6b4423, pants: 0x3b2a1a, hair: 0x2b2b2b },
+};
+const npcs = Object.entries(NPCS).map(([id, n]) => ({ id, ...n, pos: new THREE.Vector3(n.x, 0, n.z), look: NPC_LOOKS[id] }));
 for (const n of npcs) {
   n.char = createCharacter(n.look);
+  if (n.look.gear) setGear(n.char, n.look.gear);
   n.char.root.position.copy(n.pos);
   n.char.root.rotation.y = Math.atan2(-n.pos.x, -n.pos.z);
   scene.add(n.char.root);
@@ -249,6 +255,7 @@ for (const n of npcs) {
   world.colliders.push({ x: n.pos.x, z: n.pos.z, r: 0.8 });
 }
 const elder = npcs[0];
+const npcById = (id) => npcs.find((n) => n.id === id);
 let markerText = '';
 const marker = makeLabel('!', '#ffd84a', 2.2);
 marker.position.set(elder.pos.x, 4.4, elder.pos.z);
@@ -271,15 +278,22 @@ const respecButton = () => (player.cls && Object.keys(player.skills).length
   ? [{ label: '↺ Redistribuir pontos', onClick: () => request({ a: 'respec' }) }] : []);
 
 function talk(npc) {
-  if (npc.id === 'merchant') { ui.shopTab = 'buy'; return ui.openModal('shop'); }
+  if (npc.role === 'shop') { ui.shopTab = 'buy'; ui.shopName = npc.name; return ui.openModal('shop'); }
   const q = player.quest, def = QUESTS[q.idx];
-  if (q.status === 'done') return ui.dialog(npc.name, 'Graças a você a Vila Pedraverde está em paz. Novas aventuras virão em breve...', respecButton());
+  const extra = npc.id === 'elder' ? respecButton() : [];
+  if (q.status === 'done') return ui.dialog(npc.name, 'Graças a você o reino está em paz. Novas aventuras virão em breve...', extra);
+  const giver = questGiver(def);
+  if (giver !== NPCS[npc.id]) { // a missão atual é com outro NPC
+    return ui.dialog(npc.name, npc.id === 'elder'
+      ? `${giver.name} ${giver.where} precisa de você. Siga a estrada para o norte e procure no pátio do castelo (a ★ no mapa mostra o caminho).`
+      : `Bom te ver, aventureiro. Fale com ${giver.title} ${giver.where}: depois volte aqui.`, extra);
+  }
   if (q.status === 'available') {
     return ui.dialog(`${npc.name} — ${def.title}`, def.intro, [{
       label: 'Aceitar missão', onClick: () => request({ a: 'quest_accept' }),
     }]);
   }
-  if (q.status === 'active') return ui.dialog(npc.name, `${def.progressText(q.progress, def.count)}. Vá até ${def.where.label} (siga a ★ no mapa).`, respecButton());
+  if (q.status === 'active') return ui.dialog(npc.name, `${def.progressText(q.progress, def.count)}. Vá até ${def.where.label} (siga a ★ no mapa).`, extra);
   if (q.status === 'complete') {
     return ui.dialog(npc.name, def.doneText, [{
       label: 'Receber recompensa', onClick: () => request({ a: 'quest_turnin' }),
@@ -427,11 +441,30 @@ function onPlayerHit(dmg, e) {
 // ---------- Poço da vila: única cura fora as poções ----------
 const drinkFromWell = () => request({ a: 'well' });
 
+/** Pergaminho de Retorno (tecla 3): volta para a vila */
+function useScroll() {
+  if (!player.inv.scroll_return) return ui.log('Sem Pergaminho de Retorno! Compre numa loja (45 🪙).', 'bad');
+  useItem('scroll_return');
+}
+
+/** ★ dentro de dungeon/casa: o chefe da missão (se for neste andar), a escada certa, ou a saída */
+function dungeonStar(def) {
+  const d = dungeonAt(player.pos.x, player.pos.z);
+  if (!d) return HOME_EXIT;
+  const boss = def && BOSS_ROOMS[def.target];
+  if (boss && boss.dungeon === d.id) return boss;
+  if (d.region === 'tower') {
+    if (boss && boss.dungeon.startsWith('tower') && DOOR_BY_ID[`tower_up${d.floor}`]) return DOOR_BY_ID[`tower_up${d.floor}`].at; // sobe
+    return (DOOR_BY_ID[`tower_down${d.floor}`] || DOOR_BY_ID.tower_out).at; // desce / sai
+  }
+  return MINE_EXIT;
+}
+
 // ---------- Regiões: superfície, mina (escura) e casa (interior) ----------
-const MINE_BOSS_ROOM = { x: 456, z: 26 };
 const LOOKS = {
-  world: { bg: 0x8fd3ff, fog: [70, 190], hemi: 1.6, sun: 2.2 },
+  world: { bg: 0x8fd3ff, fog: TOUCH ? [60, 160] : [70, 200], hemi: 1.6, sun: 2.2 },
   mine: { bg: 0x07050a, fog: [10, 42], hemi: 0.45, sun: 0.12, lantern: 26 },
+  tower: { bg: 0x0b0812, fog: [14, 52], hemi: 0.9, sun: 0.1, lantern: 30 },
   home: { bg: 0x1d140d, fog: [30, 60], hemi: 0.9, sun: 0 },
 };
 let region = null;
@@ -446,37 +479,109 @@ function setRegion(r) {
   hemi.intensity = L.hemi;
   lantern.intensity = L.lantern || 0;
   sun.intensity = L.sun;
-  if (r === 'mine') cam.dist = Math.min(cam.dist, 12);
+  camera.far = L.fog[1] + 40; // nada além da névoa é desenhado (mais FPS)
+  camera.updateProjectionMatrix();
+  if (isDungeonRegion(r)) { // câmera de dungeon: alta, ângulo fixo, girando de 90 em 90°
+    cam.dist = DUNGEON_CAM.start;
+    cam.yawSnap = Math.round(cam.yaw / (Math.PI / 2)) * (Math.PI / 2);
+  }
   if (r === 'home') cam.dist = 13;
 }
+
+/**
+ * Câmera nas dungeons (técnica de "dungeon crawler", tipo Diablo/Hades):
+ *  - ângulo alto e fixo (≈57°), olhando de cima: dá para ver a sala e os corredores;
+ *  - gira em passos de 90° (Q/R ou arrastando e soltando): o "para frente" do WASD fica alinhado com os corredores;
+ *  - paredes entre a câmera e o jogador abaixam (cutaway, em world.js), em vez de a câmera colar no personagem;
+ *  - minimapa com névoa de guerra: só o que você já viu aparece.
+ */
+const DUNGEON_CAM = { pitch: 0.98, start: 18, min: 11, max: 24 };
 
 /** baús abertos (por jogador) ficam com a tampa aberta até reaparecerem */
 function syncTreasures() {
   const now = Date.now();
   for (const t of world.treasures) t.open = treasureLeft(player, t, now) > 0;
 }
-const mapMarks = () => [
-  ...world.treasures.map((t) => ({ x: t.x, z: t.z, icon: '💎', dim: t.open })),
-  { x: MINE_DOOR.x, z: MINE_DOOR.z, icon: '⛏️' }, { x: MINE_EXIT.x, z: MINE_EXIT.z, icon: '🪜' },
-  { x: HOME_DOOR.x, z: HOME_DOOR.z, icon: '🏠' },
-];
+const DOOR_ICONS = { mine_in: '⛏️', home_in: '🏠', tower_in: '🗼', home_out: '🚪' };
+const mapMarks = () => {
+  const d = dungeonAt(player.pos.x, player.pos.z);
+  const here = (o) => dungeonAt(o.x, o.z) === d;
+  return [
+    ...world.treasures.filter(here).map((t) => ({ x: t.x, z: t.z, icon: '💎', dim: t.open, explored: d ? explored.seen(t.x, t.z) : true })),
+    ...DOORS.filter((o) => here(o.at)).map((o) => ({ x: o.at.x, z: o.at.z, icon: DOOR_ICONS[o.id] || '🪜' })),
+    ...WELLS.map((w) => ({ x: w.x, z: w.z, icon: '💧' })),
+  ].filter((m) => m.explored !== false);
+};
+
+// ---------- Névoa de guerra das dungeons: tiles já vistos (salvo no navegador, por conta) ----------
+const explored = (() => {
+  const KEY = `blockquest-explored-${session.user?.username || 'offline'}`;
+  let data = {};
+  try { data = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { /* vazio */ }
+  const grids = {};
+  const gridOf = (d) => {
+    if (!grids[d.id]) {
+      grids[d.id] = new Uint8Array(d.cols * d.rows);
+      const s0 = data[d.id] || '';
+      for (let i = 0; i < s0.length && i < grids[d.id].length; i++) grids[d.id][i] = s0.charCodeAt(i) === 49 ? 1 : 0;
+      for (let i = 0; i < grids[d.id].length; i++) if (grids[d.id][i]) ui.revealTile(d, i % d.cols, Math.floor(i / d.cols));
+    }
+    return grids[d.id];
+  };
+  let dirty = false, saveT = 0;
+  return {
+    /** revela os tiles em volta do jogador que ele consegue ver (raio ~5 tiles) */
+    update(p, dt) {
+      const d = dungeonAt(p.x, p.z);
+      if (!d) return;
+      const g = gridOf(d);
+      const tx = Math.floor((p.x - d.x0) / d.tile), tz = Math.floor((p.z - d.z0) / d.tile);
+      for (let dz = -5; dz <= 5; dz++) {
+        for (let dx = -5; dx <= 5; dx++) {
+          const x = tx + dx, z = tz + dz;
+          if (x < 0 || z < 0 || x >= d.cols || z >= d.rows || dx * dx + dz * dz > 30 || g[z * d.cols + x]) continue;
+          const c = { x: d.x0 + (x + 0.5) * d.tile, z: d.z0 + (z + 0.5) * d.tile };
+          // parede conta como vista se algum vizinho de chão estiver à vista
+          const ok = d.grid[z][x] === 0 ? world.los(p.x, p.z, c.x, c.z)
+            : [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([ax, az]) => d.grid[z + az]?.[x + ax] === 0 && world.los(p.x, p.z, c.x + ax * d.tile, c.z + az * d.tile));
+          if (!ok) continue;
+          g[z * d.cols + x] = 1; dirty = true;
+          ui.revealTile(d, x, z);
+        }
+      }
+      saveT += dt;
+      if (dirty && saveT > 3) {
+        saveT = 0; dirty = false;
+        for (const [id, arr] of Object.entries(grids)) data[id] = Array.from(arr, (v) => (v ? '1' : '0')).join('');
+        localStorage.setItem(KEY, JSON.stringify(data));
+      }
+    },
+    seen(x, z) {
+      const d = dungeonAt(x, z);
+      if (!d) return true;
+      const tx = Math.floor((x - d.x0) / d.tile), tz = Math.floor((z - d.z0) / d.tile);
+      return !!gridOf(d)[tz * d.cols + tx];
+    },
+    init(d) { gridOf(d); },
+  };
+})();
 
 /** a coisa mais próxima com que dá para interagir (E). Retorna { label, run? } */
 function nearestInteractable() {
   const P = player.pos;
   const d = (o) => Math.hypot(P.x - o.x, P.z - o.z);
   const opts = [];
-  for (const n of npcs) if (n.pos.distanceTo(P) < 4) opts.push({ dist: n.pos.distanceTo(P), label: `${n.id === 'merchant' ? 'Abrir loja de' : 'Falar com'} ${n.name}`, run: () => talk(n) });
-  if (d(WELL) < INTERACT_RANGE.well - 1) {
+  for (const n of npcs) if (n.pos.distanceTo(P) < 4) opts.push({ dist: n.pos.distanceTo(P), label: `${n.role === 'shop' ? 'Abrir loja de' : 'Falar com'} ${n.name}`, run: () => talk(n) });
+  for (const w of WELLS) {
+    if (d(w) >= INTERACT_RANGE.well - 1) continue;
     opts.push(player.hp < player.maxHp
-      ? { dist: d(WELL), label: 'Beber água do poço (recupera toda a vida)', run: drinkFromWell }
-      : { dist: d(WELL), label: '💧 Poço da vila — sua vida está cheia' });
+      ? { dist: d(w), label: `Beber água da ${w.name} (recupera toda a vida)`, run: drinkFromWell }
+      : { dist: d(w), label: `💧 ${w.name[0].toUpperCase()}${w.name.slice(1)} — sua vida está cheia` });
   }
-  if (d(MINE_DOOR) < INTERACT_RANGE.door + 0.5) opts.push({ dist: d(MINE_DOOR), label: '⛏️ Entrar na Mina Abandonada (perigo!)', run: () => request({ a: 'enter_mine' }) });
-  if (d(MINE_EXIT) < INTERACT_RANGE.door + 0.5) opts.push({ dist: d(MINE_EXIT), label: '🪜 Subir a escada (sair da mina)', run: () => request({ a: 'leave_mine' }) });
-  if (d(HOME_DOOR) < INTERACT_RANGE.door - 0.3) opts.push({ dist: d(HOME_DOOR), label: '🏠 Entrar na sua casa', run: () => request({ a: 'enter_home' }) });
+  for (const door of DOORS) { // portas, escadas e saídas
+    if (d(door.at) < door.r - 0.3) opts.push({ dist: d(door.at), label: door.label, run: () => request({ a: 'door', id: door.id }) });
+  }
   if (region === 'home') {
-    if (d(HOME_EXIT) < INTERACT_RANGE.door - 0.5) opts.push({ dist: d(HOME_EXIT), label: '🚪 Sair de casa', run: () => request({ a: 'leave_home' }) });
     for (const [k, f] of Object.entries(HOME_FURNITURE)) {
       if (d(f) < INTERACT_RANGE.furniture - 0.3) opts.push({ dist: d(f), label: `${f.icon} Abrir ${f.name}`, run: () => { ui.homeTab = k; ui.openModal('home'); } });
     }
@@ -652,10 +757,11 @@ const touch = TOUCH ? new TouchControls(input, renderer.domElement, {
   onChat: () => sendChat && ui.openChat((text) => sendChat(text)),
   onInventory: () => !player.dead && ui.toggleModal('inventory'),
   onTree: () => !player.dead && ui.toggleModal(player.cls ? 'tree' : 'class'),
+  onScroll: () => !player.dead && useScroll(),
 }) : null;
 
 // ---------- Câmera ----------
-const cam = { yaw: 0, pitch: 0.38, dist: 13 };
+const cam = { yaw: 0, pitch: 0.38, dist: 13, yawSnap: 0 };
 
 // ---------- Loop ----------
 const clock = new THREE.Timer();
@@ -668,13 +774,23 @@ function update(dt) {
   const t = player.t;
 
   // câmera
-  if (input.rmb || input.touchCam) {
+  const inDungeon = isDungeonRegion(region);
+  const dragging = input.rmb || input.touchCam;
+  if (dragging) {
     cam.yaw -= input.dx * 0.005;
-    cam.pitch = THREE.MathUtils.clamp(cam.pitch + input.dy * 0.004, 0.05, 1.35);
+    if (!inDungeon) cam.pitch = THREE.MathUtils.clamp(cam.pitch + input.dy * 0.004, 0.05, 1.35);
   }
-  cam.dist = THREE.MathUtils.clamp(cam.dist + input.wheel * 1.2, 5, 28);
-  if (input.held('camLeft')) cam.yaw += dt * 2;
-  if (input.held('camRight')) cam.yaw -= dt * 2;
+  if (inDungeon) {
+    cam.dist = THREE.MathUtils.clamp(cam.dist + input.wheel * 1.2, DUNGEON_CAM.min, DUNGEON_CAM.max);
+    if (input.hit('camLeft')) cam.yawSnap += Math.PI / 2; // Q/R: gira 90°
+    if (input.hit('camRight')) cam.yawSnap -= Math.PI / 2;
+    if (dragging) cam.yawSnap = Math.round(cam.yaw / (Math.PI / 2)) * (Math.PI / 2); // ao soltar, encaixa no ângulo mais próximo
+    else cam.yaw += (cam.yawSnap - cam.yaw) * Math.min(1, dt * 8);
+  } else {
+    cam.dist = THREE.MathUtils.clamp(cam.dist + input.wheel * 1.2, 5, 28);
+    if (input.held('camLeft')) cam.yaw += dt * 2;
+    if (input.held('camRight')) cam.yaw -= dt * 2;
+  }
 
   // atalhos de interface
   if (input.tapped('Escape')) {
@@ -729,6 +845,7 @@ function update(dt) {
     if (input.hit('skill')) useSkill();
     if (input.hit('potion')) useItem('potion');
     if (input.hit('bigPotion')) useItem('big_potion');
+    if (input.hit('scroll')) useScroll();
   }
 
   // coisa mais próxima para interagir (NPC, poço, portas, móveis da casa, baús de tesouro)
@@ -800,7 +917,8 @@ function update(dt) {
   // marcador de missão
   const q = player.quest;
   setMarker(q.status === 'available' ? '!' : q.status === 'complete' ? '?' : '');
-  marker.position.y = 4.4 + Math.sin(t * 3) * 0.15;
+  const giverNpc = npcById(Object.keys(NPCS).find((k) => NPCS[k] === questGiver(QUESTS[q.idx])) || 'elder');
+  marker.position.set(giverNpc.pos.x, 4.4 + Math.sin(t * 3) * 0.15, giverNpc.pos.z);
 
   const z = world.zoneAt(player.pos.x, player.pos.z);
   if (z && z.id !== currentZone?.id) ui.log(`📍 ${z.name}`, 'info');
@@ -821,7 +939,7 @@ function update(dt) {
   // câmera segue
   const camTarget = new THREE.Vector3(player.pos.x, player.pos.y + 2.2, player.pos.z);
   // dentro de casa (sem teto): câmera alta, olhando de cima, para ver o cômodo inteiro
-  const pitch = region === 'home' ? Math.max(cam.pitch, 1.0) : region === 'mine' ? Math.max(cam.pitch, 0.85) : cam.pitch;
+  const pitch = region === 'home' ? Math.max(cam.pitch, 1.0) : inDungeon ? DUNGEON_CAM.pitch : cam.pitch;
   camera.position.set(
     camTarget.x + cam.dist * Math.cos(pitch) * Math.sin(cam.yaw),
     camTarget.y + cam.dist * Math.sin(pitch),
@@ -831,6 +949,9 @@ function update(dt) {
 
   camera.lookAt(camTarget);
   world.fadeOccluders(camera.position, player.pos);
+  world.cutaway(camera.position, player.pos, dt);
+  world.updateLights(player.pos, t);
+  explored.update(player.pos, dt);
   sound.setListener(player.pos, new THREE.Vector3(Math.cos(cam.yaw), 0, -Math.sin(cam.yaw)));
   sun.position.set(player.pos.x + 30, 60, player.pos.z + 20);
   lantern.position.set(player.pos.x, 4.5, player.pos.z);
@@ -840,19 +961,22 @@ function update(dt) {
   const def = QUESTS[q.idx];
   let qh;
   if (q.status === 'done') qh = '<h3>🏆 Todas as missões concluídas</h3><p>Você é o herói da vila!</p>';
-  else if (q.status === 'available') qh = `<h3>❗ Nova missão</h3><p>Fale com o ${elder.name} na vila.</p>`;
+  else if (q.status === 'available') qh = `<h3>❗ Nova missão</h3><p>Fale com ${questGiver(def).title} ${questGiver(def).where}.</p>`;
   else if (q.status === 'active') {
     const d = Math.round(Math.hypot(def.where.x - player.pos.x, def.where.z - player.pos.z));
     qh = `<h3>${def.title}</h3><p>${def.progressText(q.progress, def.count)}</p><p>★ ${def.where.label} — ${d}m</p>`;
-  } else qh = `<h3>${def.title} ✔</h3><p>Volte ao ${elder.name} para a recompensa.</p>`;
+  } else qh = `<h3>${def.title} ✔</h3><p>Volte para ${questGiver(def).title} ${questGiver(def).where} para a recompensa.</p>`;
   ui.quest(qh);
   ui.hud(player, xpToNext(player.level), weapon());
   ui.skillButton(player, skillReadyAt, player.t);
-  let questTarget = q.status === 'active' ? def.where : (q.status === 'available' || q.status === 'complete') ? elder.pos : null;
-  if (questTarget && region === 'mine' && def?.target === 'goblin_boss') questTarget = MINE_BOSS_ROOM; // dentro da mina a ★ aponta o chefe
-  else if (questTarget && region !== 'world') questTarget = region === 'mine' ? MINE_EXIT : HOME_EXIT; // senão aponta a saída
+  const qGiver = (q.status === 'available' || q.status === 'complete') && questGiver(def);
+  let questTarget = q.status === 'active' ? def.where : qGiver ? qGiver : null;
+  if (questTarget && region !== 'world') questTarget = dungeonStar(q.status === 'active' ? def : null);
   syncTreasures();
-  ui.minimap(player, enemies.alive(), region === 'world' ? npcs : [], questTarget, loot.list, remote ? remote.list() : [], mapMarks());
+  // nas dungeons, o minimapa só mostra monstros que você enxerga (mesma sala / sem parede no meio)
+  const seen = (e) => !inDungeon || (distXZ(e.pos, player.pos) < 32 && world.los(player.pos.x, player.pos.z, e.pos.x, e.pos.z) && explored.seen(e.pos.x, e.pos.z));
+  const sameArea = (o) => dungeonAt(o.pos.x, o.pos.z) === dungeonAt(player.pos.x, player.pos.z);
+  ui.minimap(player, enemies.alive().filter(seen), region === 'world' ? npcs : [], questTarget, loot.list, remote ? remote.list().filter(sameArea) : [], mapMarks());
   ui.updateFloats(camera, dt);
 
   saveTimer += dt;
@@ -878,4 +1002,4 @@ ui.log('Bem-vindo a BlockQuest! Fale com o Ancião Bento.', 'info');
 frame();
 
 // atalho de debug no console
-window.game = { player, enemies, loot, ui, equip, unequip, defense, onPlayerHit, addItem, request, applyFx, localLoot, projectiles, world, sound, session, get net() { return net; }, get remote() { return remote; }, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };
+window.game = { player, cam, enemies, loot, ui, equip, unequip, defense, onPlayerHit, addItem, request, applyFx, localLoot, projectiles, world, sound, session, get net() { return net; }, get remote() { return remote; }, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };

@@ -6,7 +6,7 @@ import { TYPES } from '../src/shared/mobs.js';
 import { QUESTS } from '../src/shared/quests.js';
 import { gainXp, setLevel, maxHpOf } from '../src/shared/progress.js';
 import { CLASSES, CLASS_LEVEL } from '../src/shared/classes.js';
-import { WORLD_RADIUS, MINE_ENTRY, MINE_ROOM_CENTERS, MINE_DOOR, HOME_ENTRY } from '../src/shared/worldData.js';
+import { WORLD_RADIUS, MINE_ENTRY, MINE_ROOM_CENTERS, MINE_DOOR, HOME_ENTRY, DOOR_BY_ID, BOSS_ROOMS, CASTLE, CURSED, TOWER_DOOR } from '../src/shared/worldData.js';
 import { mute, unmute, staffLog, fmtDur } from './moderation.js';
 
 export const CLOSE = { kicked: 4005, banned: 4004 };
@@ -143,7 +143,11 @@ export function runCommand(me, cmd, args, ctx) {
     case '/tp': {
       let x, z, label;
       // atalhos: /tp mina | chefe | porta | casa
-      const places = { mina: MINE_ENTRY, chefe: MINE_ROOM_CENTERS.find((r) => r.id === 'chefe'), porta: { x: MINE_DOOR.x * 0.97, z: MINE_DOOR.z * 0.97 }, casa: HOME_ENTRY };
+      const places = {
+        mina: MINE_ENTRY, chefe: MINE_ROOM_CENTERS.find((r) => r.id === 'chefe'), porta: { x: MINE_DOOR.x * 0.97, z: MINE_DOOR.z * 0.97 }, casa: HOME_ENTRY,
+        castelo: { x: CASTLE.x, z: CASTLE.z + 14 }, ruinas: { x: CURSED.x, z: CURSED.z + 22 }, torre: { x: TOWER_DOOR.x, z: TOWER_DOOR.z - 3 },
+        andar1: DOOR_BY_ID.tower_in.to, andar2: DOOR_BY_ID.tower_up1.to, andar3: DOOR_BY_ID.tower_up2.to, andar4: DOOR_BY_ID.tower_up3.to, necromante: BOSS_ROOMS.necromancer,
+      };
       const place = args.length === 1 && places[args[0]?.toLowerCase()];
       const t = args.length === 1 && !place ? online(args[0]) : null;
       if (place) { ({ x, z } = place); label = args[0]; } else if (t) { ({ x, z } = t.lastPos); x += 2; label = t.name; } else {

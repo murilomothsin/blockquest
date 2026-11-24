@@ -52,6 +52,7 @@ export class TouchControls {
     const tbtn = (icon, title, fn) => { const b = el('button', 'tsmall', icon); b.title = title; b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); fn(); }); top.append(b); return b; };
     tbtn('🎒', 'Inventário', () => this.opts.onInventory?.());
     tbtn('⭐', 'Classe e habilidades', () => this.opts.onTree?.());
+    tbtn('📜', 'Pergaminho de Retorno (volta para a vila)', () => this.opts.onScroll?.());
     if (this.opts.online) tbtn('💬', 'Chat', () => this.opts.onChat?.());
     if (document.documentElement.requestFullscreen) tbtn('⛶', 'Tela cheia', () => this.fullscreen());
     root.append(top);

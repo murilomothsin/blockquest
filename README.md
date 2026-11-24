@@ -75,7 +75,7 @@ Comandos (digite `/ajuda` no jogo para ver só os do seu cargo):
 | `/expulsar nome [motivo]` | mod, admin | desconecta |
 | `/banir nome horas [motivo]` · `/desbanir nome` | mod, admin | suspende a conta (`0` = permanente); o login mostra o motivo |
 | `/denuncias` · `/resolver id` | mod, admin | denúncias abertas |
-| `/tp x z` · `/tp nome` · `/tp mina\|chefe\|porta\|casa` | QA, admin | teleporta |
+| `/tp x z` · `/tp nome` · `/tp mina\|chefe\|porta\|casa\|castelo\|ruinas\|torre\|andar1..4\|necromante` | QA, admin | teleporta |
 | `/classe nome` | QA, admin | troca de classe na hora (zera a árvore) |
 | `/item id [qtd]` · `/itens` · `/ouro n` · `/xp n` · `/nivel n` | QA, admin | dá itens/ouro/XP, define nível |
 | `/curar` · `/imortal` · `/spawn tipo [qtd]` · `/matar` · `/missao n` | QA, admin | ferramentas de teste |
@@ -115,9 +115,10 @@ Todos os controles de ação podem ser remapeados no jogo (painel **Controles �
 | Pular | Espaço |
 | Atacar | Clique esquerdo ou F |
 | Travar alvo | Clicar no inimigo, ou Tab para alternar |
-| Câmera | Botão direito + arrastar, Q/R, scroll pra zoom |
+| Câmera | Botão direito + arrastar, Q/R, scroll pra zoom (nas dungeons Q/R giram de 90 em 90°) |
 | Interagir (falar, loja, poço, portas, móveis da casa, baús) | E |
 | Poção / Poção grande | 1 / 2 |
+| Pergaminho de Retorno (volta para a vila) | 3 |
 | Habilidade da classe | G |
 | Classe / árvore de habilidades | K |
 | Inventário | I |
@@ -137,7 +138,7 @@ Em telas de toque os controles aparecem sozinhos (no PC dá para testar com `?to
 | ⚔️ (segurar continua atacando) · ⤒ Pular · 🎯 Alvo · 🧪 Poção | ações |
 | ✋ Usar | falar, loja, poço, portas, móveis, baús (acende verde quando tem algo perto) |
 | Botão da habilidade | habilidade da classe (G) |
-| 🎒 ⭐ 💬 ⛶ (topo) | inventário, classe/habilidades, chat (online), tela cheia |
+| 🎒 ⭐ 📜 💬 ⛶ (topo) | inventário, classe/habilidades, Pergaminho de Retorno, chat (online), tela cheia |
 
 Os controles somem enquanto uma janela está aberta. No celular o jogo usa menos resolução e sombras menores (mais FPS e bateria). Melhor deitado — em pé aparece um aviso.
 
@@ -146,13 +147,14 @@ Os controles somem enquanto uma janela está aberta. No celular o jogo usa menos
 ## Mecânicas
 
 - **Mira:** assistida, com anel amarelo no alvo automático do arco e anel vermelho no alvo travado (clique ou Tab). As flechas fazem uma leve curva até o alvo travado.
-- **Vida:** não regenera sozinha. Recupera só com **poções** ou **bebendo no poço da vila** (E). Inimigos regeneram devagar (2%/s) depois de 12 s sem levar dano.
-- **Zona segura:** círculo de 32 m em volta da vila (marcado no chão). Monstros não entram e nada aparece ali.
+- **Vida:** não regenera sozinha. Recupera só com **poções** ou **bebendo no poço da vila / na fonte do castelo** (E). Inimigos regeneram devagar (2%/s) depois de 12 s sem levar dano.
+- **Zonas seguras:** círculo de 32 m em volta da vila e o pátio do castelo (marcados no chão). Monstros não entram e nada aparece ali.
 - **Encontros selvagens (estilo Pokémon):** andando no meio das árvores, fora da vila e das estradas, de vez em quando um goblin pula do mato (com "!"). No máximo 2 por jogador, com intervalo mínimo de 15 s. Online, outros jogadores por perto também veem e podem ajudar. Configurável em `WILD` (`src/shared/mobs.js`).
 - **Golem Antigo:** se você fica a mais de 8 m, ele arremessa pedras. Uma área vermelha marca onde a pedra vai cair, e dá pra desviar.
 - **Drops:** a cada 5 inimigos derrotados cai um baú (poção, arma ou armadura). O chefe sempre deixa um equipamento raro.
 - **Armaduras e capacetes:** 5 tiers com as mesmas cores das armas (couro, ferro, aço, rúnico e élfico, este só caindo de monstros). A defesa da armadura e do capacete soma, e cada ponto reduz o dano em %, com retorno decrescente: `def / (def + 25)`. Ferro completo (10) bloqueia 29%; rúnico completo (27), 52%. A primeira missão dá uma Armadura de Couro.
-- **Limite do mapa:** círculo de 190 m, cercado por montanhas.
+- **Limite do mapa:** círculo de 300 m, cercado por montanhas.
+- **Pergaminhos (uso único):** Retorno (45 🪙, tecla 3: volta para o centro da vila de qualquer lugar, inclusive dungeons), Proteção (+15 defesa por 60 s), Pressa (+30% velocidade por 45 s) e Fúria (+25% dano por 30 s). Vendidos nas lojas, caem de baús e dos drops; o Baú de casa guarda pergaminhos. Os efeitos ativos aparecem ao lado do painel com o tempo restante.
 
 ### Biomas
 | Bioma | Onde | Monstros | Baú |
@@ -161,12 +163,29 @@ Os controles somem enquanto uma janela está aberta. No celular o jogo usa menos
 | Deserto Escaldante | leste | esqueletos | 1 |
 | Pântano Sombrio | sudoeste | aranhas, mortos-vivos | 1 |
 | Pedreira | noroeste | goblins das cavernas · **entrada da mina** | 1 |
+| Planalto de Pedralta | norte | lobos (em bando) · **Castelo de Pedralta** | 2 |
+| Terras Amaldiçoadas | sul/sudeste | fantasmas, esqueletos · **Ruínas Amaldiçoadas** e **Torre do Necromante** | 2 |
+
+### Castelo de Pedralta
+Ao norte (siga a estrada). Muralhas, torres, portão e um pátio que é **zona segura**, com a **Capitã Helena** (missões 5–8), o **Ferreiro Duarte** (loja igual à da Mercadora Lia) e uma **fonte** que cura como o poço.
+
+### Ruínas Amaldiçoadas
+Cemitério com lápides, muros caídos, névoa roxa, fogos-fátuos e uma cripta. **Fantasmas** flutuam pelas ruínas e a **Rainha Espectral** (6.500 de vida) guarda a cripta: o grito dela cai numa área marcada no chão.
+
+### Torre do Necromante (dungeon de 4 andares)
+No extremo sul. Cada andar é uma dungeon com escadas para subir/descer: **1º Salão dos Ossos** (esqueletos, cultistas), **2º Biblioteca Proibida** (fantasmas, cultistas, estantes), **3º Câmara das Gárgulas** (anéis em espiral até a escada), **4º Topo** com o **Necromante** (10.000 de vida, feitiços em área) e o baú lendário. Cultistas e o Necromante atacam de longe. Paredes valem no servidor.
+
+### Câmera e minimapa nas dungeons
+Técnicas de câmera de *dungeon crawler* (Diablo, Hades): **ângulo alto e fixo**, giro em **passos de 90°** (Q/R, ou arrastar e soltar, que encaixa no ângulo mais próximo) para o "para frente" ficar alinhado com os corredores, e **cutaway**: as paredes entre a câmera e o personagem abaixam em vez de esconder você. O minimapa tem **névoa de guerra** (só aparece o que você já viu, salvo no navegador) e só mostra os monstros que você enxerga (mesma sala, sem parede no meio). Dentro de uma dungeon, a ★ aponta o chefe da missão ou a escada certa.
+
+### Missões
+1–4 com o Ancião Bento (slimes, goblins, Golem, mina). Depois ele te manda para o castelo: **5 Lobos do Planalto**, **6 Os Mortos Não Descansam** (fantasmas), **7 A Rainha Espectral** e **8 A Torre do Necromante**, com a Capitã Helena. O "!" e o "?" aparecem em cima de quem dá a missão.
 
 ### Mina Abandonada (dungeon)
 Entre pela porta na Pedreira (E). Lá dentro é escuro (o personagem leva uma lanterna) e as paredes bloqueiam movimento, flechas e visão — também no servidor. São 7 salas: entrada, aranhas, ossos (esqueletos), goblins das cavernas, cripta (mortos-vivos), salão e a sala do chefe **Goblin Minerador** (3.200 de vida, joga dinamite com área marcada no chão). 22 monstros e 6 baús. Saída pela escada da entrada. Feita para o **nível 8** (ver Balanceamento).
 
 ### Baús de tesouro
-12 baús fixos (6 na superfície, 6 na mina). Abrir (E) espalha **moedas douradas** e 1–4 itens no chão. Cada jogador tem os seus: depois de aberto, o baú volta em 10 min (comum), 20 min (raro) ou 45 min (lendário, sala do chefe, sempre com 1 equipamento de chefe).
+20 baús fixos (superfície, mina e torre). Abrir (E) espalha **moedas douradas** e 1–4 itens no chão. Cada jogador tem os seus: depois de aberto, o baú volta em 10 min (comum), 20 min (raro) ou 45 min (lendário, sala do chefe, sempre com 1 equipamento de chefe).
 
 ### Classes e árvore de habilidades
 No **nível 2** o jogador escolhe a classe (permanente; ganha a arma da classe de presente). Inspiradas nas classes que existem tanto em **Tormenta20** quanto em **D&D 5e** e que combinam com um RPG de ação com espada/arco/magia:
@@ -182,13 +201,13 @@ Ficaram de fora (por enquanto): Clérigo/Paladino (precisam de cura em grupo —
 Cada classe tem uma árvore de 5 nós: 3 de atributos (até 3 pontos), a habilidade ativa e um nó final que depende dela. **1 ponto por nível** (árvore completa no nível 13). O Ancião Bento redistribui os pontos por 25 × nível de ouro. Cajados (magia em área) e adagas (golpes rápidos) entraram na loja para o Arcanista e o Ladino.
 
 ### Casa do jogador
-A casa com a porta dourada, ao lado do poço, é a sua (E para entrar). Por dentro é **privada**: cada jogador vê só a própria (os outros não te veem lá). Móveis: **Armário de Armas** (armas, armaduras, elmos), **Baú** (poções), **Cofre** (ouro) e **Espelho** (personalização, em breve).
+A casa com a porta dourada, ao lado do poço, é a sua (E para entrar). Por dentro é **privada**: cada jogador vê só a própria (os outros não te veem lá). Móveis: **Armário de Armas** (armas, armaduras, elmos), **Baú** (poções e pergaminhos), **Cofre** (ouro) e **Espelho** (personalização, em breve).
 
 ### Morte
 Ao morrer você **perde tudo o que carrega** (volta com uma Espada de Madeira) e uma parte do **ouro na mão**: 10% na 1ª morte, 20% na 2ª, 30% na 3ª... O contador zera **a cada 2 dias, à meia-noite UTC**. **Proteção de novato:** até o nível 3 a morte não tira os itens (só a parte do ouro); ao chegar no nível 4 o jogo avisa que a proteção acabou. O que está guardado em casa nunca se perde — a ideia é que a casa vire o "banco" e o armário guarde um equipamento reserva.
 
 ### Balanceamento
-`node scripts/balance.mjs` simula, com as mesmas regras do jogo, dano por segundo de cada classe por nível, tempo para matar cada monstro, vida perdida em cada sala da mina, economia e custo da morte. Progressão típica: missão dos goblins no Nv3, Golem no Nv5, biomas no Nv6–7, mina no **Nv8**, saída da mina no Nv9.
+`node scripts/balance.mjs` simula, com as mesmas regras do jogo, dano por segundo de cada classe por nível, tempo para matar cada monstro, vida perdida em cada sala da mina e andar da torre, economia e custo da morte. Progressão típica: goblins no Nv3, Golem no Nv5, mina no **Nv8**, lobos no Nv9, fantasmas no Nv11, Rainha no Nv12, torre no **Nv14**.
 
 ## Sons
 
@@ -209,7 +228,7 @@ scripts/
   dev.js         sobe servidor + Vite
   cargo.js       define/lista cargos (npm run cargo)
   denuncias.js   lista/resolve denúncias (npm run denuncias)
-  test-*.mjs     testes do servidor: test-server (economia/cargos), test-chat, test-mina (classes, casa, mina, baús, morte)
+  test-*.mjs     testes do servidor: test-server (economia/cargos), test-chat, test-mina (classes, casa, mina, baús, morte), test-expansao (torre, pergaminhos, castelo)
   balance.mjs    análise de balanceamento (números)
 src/
   shared/        código usado pelo navegador E pelo servidor:

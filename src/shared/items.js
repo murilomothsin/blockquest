@@ -2,6 +2,12 @@ export const ITEMS = {
   potion: { name: 'Poção de Vida', icon: '🧪', kind: 'consumable', heal: 0.5, price: 15, sell: 6, desc: 'Recupera 50% da vida.' },
   big_potion: { name: 'Poção Grande', icon: '⚗️', kind: 'consumable', heal: 1, price: 40, sell: 15, desc: 'Recupera 100% da vida.' },
 
+  // Pergaminhos mágicos: uso único. tp = teleporte; buff = efeito por tempo (ver BUFFS em classes.js)
+  scroll_return: { name: 'Pergaminho de Retorno', icon: '📜', kind: 'consumable', sub: 'scroll', tp: 'village', color: 0xe8d9a8, price: 45, sell: 15, desc: 'Uso único: teleporta você para o centro da vila (sai de qualquer dungeon).' },
+  scroll_shield: { name: 'Pergaminho de Proteção', icon: '🔰', kind: 'consumable', sub: 'scroll', buff: 'shield', color: 0x6fb3ff, price: 60, sell: 20, desc: 'Uso único: +15 de defesa por 60 s.' },
+  scroll_haste: { name: 'Pergaminho de Pressa', icon: '💨', kind: 'consumable', sub: 'scroll', buff: 'haste', color: 0x9fe870, price: 50, sell: 18, desc: 'Uso único: +30% de velocidade por 45 s.' },
+  scroll_fury: { name: 'Pergaminho de Fúria', icon: '🔥', kind: 'consumable', sub: 'scroll', buff: 'fury', color: 0xff7a3a, price: 80, sell: 28, desc: 'Uso único: +25% de dano por 30 s.' },
+
   wood_sword: { name: 'Espada de Madeira', icon: '🗡️', kind: 'weapon', style: 'melee', bonus: 0, color: 0xa0703a, price: 10, sell: 2 },
   iron_sword: { name: 'Espada de Ferro', icon: '🗡️', kind: 'weapon', style: 'melee', bonus: 8, color: 0xcfd6de, price: 120, sell: 50 },
   steel_sword: { name: 'Espada de Aço', icon: '🗡️', kind: 'weapon', style: 'melee', bonus: 18, color: 0x8fb3d9, price: 260, sell: 110 },
@@ -37,7 +43,7 @@ export const ITEMS = {
 };
 
 export const SHOP = [
-  'potion', 'big_potion',
+  'potion', 'big_potion', 'scroll_return', 'scroll_shield', 'scroll_haste', 'scroll_fury',
   'wood_sword', 'iron_sword', 'steel_sword', 'rune_blade',
   'iron_dagger', 'steel_dagger',
   'short_bow', 'long_bow',
@@ -50,10 +56,10 @@ export const SHOP = [
 export const SLOTS = { weapon: 'equipped', armor: 'armor', helmet: 'helmet' };
 
 export const CATEGORIES = [
-  ['consumable', '🧪 Consumíveis'], ['melee', '⚔️ Espadas'], ['dagger', '🔪 Adagas'], ['ranged', '🏹 Arcos'],
+  ['consumable', '🧪 Poções'], ['scroll', '📜 Pergaminhos'], ['melee', '⚔️ Espadas'], ['dagger', '🔪 Adagas'], ['ranged', '🏹 Arcos'],
   ['magic', '🪄 Cajados'], ['armor', '🛡️ Armaduras'], ['helmet', '⛑️ Capacetes'],
 ];
-export const category = (it) => (it.kind === 'weapon' ? (it.sub || it.style) : it.kind);
+export const category = (it) => (it.sub === 'scroll' ? 'scroll' : it.kind === 'weapon' ? (it.sub || it.style) : it.kind);
 
 /** Tempo entre golpes por estilo (adagas multiplicam por cdMul). range = alcance do corpo a corpo. */
 export const ATTACK = {
@@ -79,7 +85,7 @@ export function itemStats(it) {
 }
 
 const DROPS = [
-  ['potion', 38], ['big_potion', 18],
+  ['potion', 38], ['big_potion', 18], ['scroll_return', 9], ['scroll_shield', 4], ['scroll_haste', 4], ['scroll_fury', 3],
   ['iron_sword', 5], ['short_bow', 5], ['iron_dagger', 4], ['apprentice_staff', 4], ['leather_armor', 6], ['leather_helmet', 6],
   ['steel_sword', 3], ['long_bow', 3], ['steel_dagger', 2.5], ['crystal_staff', 2.5], ['iron_armor', 4], ['iron_helmet', 4],
   ['steel_armor', 2.5], ['steel_helmet', 2.5],

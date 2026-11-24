@@ -4,9 +4,9 @@ import { ITEMS, SHOP, CATEGORIES, category, itemStats, damageReduction } from '.
 import { ACTIONS, RESERVED, keyLabel } from './input.js';
 import { roleOf } from './shared/roles.js';
 import { NOVICE_MAX_LEVEL } from './shared/progress.js';
-import { BIOMES, biomeBlend, MINE, MINE_GRID, HOME_FURNITURE, inMine, inHome } from './shared/worldData.js';
+import { BIOMES, biomeBlend, DUNGEONS, HOME_FURNITURE, dungeonAt, inHome, CASTLE } from './shared/worldData.js';
 import {
-  CLASSES, CLASS_IDS, CLASS_LEVEL, TREES, SKILLS, RESPEC_COST, skillPointsFree, skillPointsTotal, canRaise, statsOf, activeSkillOf,
+  CLASSES, CLASS_IDS, CLASS_LEVEL, TREES, SKILLS, RESPEC_COST, skillPointsFree, skillPointsTotal, canRaise, statsOf, activeSkillOf, BUFFS,
 } from './shared/classes.js';
 
 const $ = (id) => document.getElementById(id);
@@ -234,6 +234,11 @@ export class UI {
     $('xpfill').style.width = `${(p.xp / xpNext) * 100}%`;
     $('xptext').textContent = `XP ${p.xp} / ${xpNext}`;
     $('gold').textContent = p.gold;
+    $('scrolls').textContent = p.inv.scroll_return || 0;
+    // pergaminhos ativos (ícone + segundos restantes)
+    const now = Date.now();
+    const bf = Object.entries(p.buffs || {}).filter(([id, u]) => u > now && BUFFS[id]).map(([id, u]) => `<span class="buff" title="${BUFFS[id].name}">${BUFFS[id].icon} ${Math.ceil((u - now) / 1000)}s</span>`).join('');
+    if (bf !== this._bf) { $('buffs').innerHTML = bf; this._bf = bf; }
     // classe e pontos livres
     const cl = CLASSES[p.cls];
     const free = skillPointsFree(p);
@@ -522,7 +527,7 @@ export class UI {
 
   renderShop(body, tabs) {
     const { player, buy, sell } = this.game;
-    $('mtitle').replaceChildren(h('span', {}, '🛒 Mercadora Lia '), h('span', { class: 'goldtag' }, `🪙 ${player.gold}`));
+    $('mtitle').replaceChildren(h('span', {}, `🛒 ${this.shopName || 'Mercadora Lia'} `), h('span', { class: 'goldtag' }, `🪙 ${player.gold}`));
     for (const [id, label] of [['buy', 'Comprar'], ['sell', 'Vender']]) {
       tabs.appendChild(h('button', { class: `tab ${this.shopTab === id ? 'active' : ''}`, onclick: () => { this.shopTab = id; this.renderModal(); } }, label));
     }
@@ -677,19 +682,35 @@ export class UI {
   }
 
   // ---------- Minimapa ----------
+  /** canvas da dungeon: começa preto; revealTile pinta o que o jogador já viu */
+  dungeonMap(d) {
+    this.dmaps = this.dmaps || {};
+    if (!this.dmaps[d.id]) {
+      const c = document.createElement('canvas'); c.width = d.cols; c.height = d.rows;
+      this.dmaps[d.id] = { img: c, g: c.getContext('2d') };
+    }
+    return this.dmaps[d.id];
+  }
+
+  revealTile(d, x, z) {
+    const m = this.dungeonMap(d);
+    m.g.fillStyle = d.grid[z][x] ? (d.style === 'tower' ? '#2e2838' : '#2a221c') : (d.style === 'tower' ? '#8a7fa0' : '#8a7660');
+    m.g.fillRect(x, z, 1, 1);
+  }
+
   minimap(player, enemies, npcs, target, loot = [], others = [], marks = []) {
     const g = this.mini, W = 170;
-    const mine = inMine(player.pos.x, player.pos.z), home = inHome(player.pos.x, player.pos.z);
-    const R = mine ? 36 : home ? 12 : 60, sc = W / 2 / R;
+    const dun = dungeonAt(player.pos.x, player.pos.z), home = inHome(player.pos.x, player.pos.z);
+    const R = dun ? 36 : home ? 12 : 60, sc = W / 2 / R;
     g.clearRect(0, 0, W, W);
     g.save();
     g.beginPath(); g.arc(W / 2, W / 2, W / 2, 0, Math.PI * 2); g.clip();
-    g.fillStyle = mine ? '#1a1410' : home ? '#6b4a2b' : '#3f7d34'; g.fillRect(0, 0, W, W);
+    g.fillStyle = dun ? '#05040a' : home ? '#6b4a2b' : '#3f7d34'; g.fillRect(0, 0, W, W);
     const toMap = (x, z) => [W / 2 + (x - player.pos.x) * sc, W / 2 + (z - player.pos.z) * sc];
-    if (mine) {
-      const m = this.maps.mine;
+    if (dun) { // planta da dungeon com névoa de guerra (só os tiles já vistos)
+      const m = this.dungeonMap(dun);
       g.imageSmoothingEnabled = false;
-      g.drawImage(m.img, ...toMap(m.x0, m.z0), m.w * sc, m.h * sc);
+      g.drawImage(m.img, ...toMap(dun.x0, dun.z0), dun.cols * dun.tile * sc, dun.rows * dun.tile * sc);
     } else if (!home) {
       const m = this.maps.world;
       g.drawImage(m.img, ...toMap(m.x0, m.z0), m.w * sc, m.h * sc);
@@ -699,6 +720,8 @@ export class UI {
         g.fillStyle = z.color + '88';
         g.beginPath(); g.arc(...toMap(z.x, z.z), z.r * sc, 0, Math.PI * 2); g.fill();
       }
+      g.strokeStyle = '#d8d0bc'; g.lineWidth = 2.5; // muralha do castelo
+      g.strokeRect(...toMap(CASTLE.x - CASTLE.half, CASTLE.z - CASTLE.half), CASTLE.half * 2 * sc, CASTLE.half * 2 * sc);
     }
     for (const mk of marks) { // baús de tesouro, portas
       const [x, y] = toMap(mk.x, mk.z);
@@ -760,14 +783,7 @@ function buildMapImages() {
     }
   }
   g.putImageData(img, 0, 0);
-  const mc = document.createElement('canvas'); mc.width = MINE.cols; mc.height = MINE.rows;
-  const mg = mc.getContext('2d');
-  for (let z = 0; z < MINE.rows; z++) for (let x = 0; x < MINE.cols; x++) {
-    mg.fillStyle = MINE_GRID[z][x] ? '#2a221c' : '#8a7660';
-    mg.fillRect(x, z, 1, 1);
-  }
   return {
     world: { img: wc, x0: -R, z0: -R, w: n * step, h: n * step },
-    mine: { img: mc, x0: MINE.x0, z0: MINE.z0, w: MINE.cols * MINE.tile, h: MINE.rows * MINE.tile },
   };
 }

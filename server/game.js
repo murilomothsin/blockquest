@@ -2,7 +2,7 @@
 // O servidor é a fonte da verdade do progresso: o cliente só manda posição e PEDIDOS
 // ("acertei o monstro 12", "comprar espada", "pegar baú 3") e recebe o resultado.
 import { MobSim, TYPES } from '../src/shared/mobs.js';
-import { buildLayout, createWorldQueries, WORLD_RADIUS, SPAWN_POINT, regionAt } from '../src/shared/worldData.js';
+import { buildLayout, createWorldQueries, WORLD_RADIUS, SPAWN_POINT, regionAt, dungeonAt } from '../src/shared/worldData.js';
 import { ITEMS } from '../src/shared/items.js';
 import { LootBag, act, kill, hurt, publicCharacter } from '../src/shared/progress.js';
 import { playerAttack, playerSkill } from '../src/shared/combatRules.js';
@@ -105,7 +105,8 @@ export function createGame({ players, send }) {
     const d = Math.hypot(s.x - p.lastPos.x, s.z - p.lastPos.z);
     const budget = ((now - p.lastPosT) / 1000) * MAX_SPEED + SPEED_SLACK;
     // na mina as paredes valem no servidor também (nada de atravessar até o chefe/baús)
-    const wall = regionAt(s.x, s.z) === 'mine' && (world.isBlocked(s.x, s.z) || !world.los(p.lastPos.x, p.lastPos.z, s.x, s.z));
+    // nas dungeons as paredes valem no servidor também (nada de atravessar até o chefe/baús, nem pular de andar)
+    const wall = !!dungeonAt(s.x, s.z) && (world.isBlocked(s.x, s.z) || !world.los(p.lastPos.x, p.lastPos.z, s.x, s.z));
     if (d > budget || wall) {
       p.speedFlags = (p.speedFlags || 0) + 1;
       send(p.ws, { t: 'setpos', x: p.lastPos.x, z: p.lastPos.z });

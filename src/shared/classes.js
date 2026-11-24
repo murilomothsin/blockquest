@@ -40,6 +40,13 @@ export const CLASSES = {
 };
 export const CLASS_IDS = Object.keys(CLASSES);
 
+/** Efeitos temporários dos pergaminhos: c.buffs = { id: até quando (ms) } */
+export const BUFFS = {
+  shield: { name: 'Proteção', icon: '🔰', secs: 60, eff: { def: 15 } },
+  haste: { name: 'Pressa', icon: '💨', secs: 45, eff: { speed: 0.3 } },
+  fury: { name: 'Fúria', icon: '🔥', secs: 30, eff: { dmg: { melee: 0.25, ranged: 0.25, magic: 0.25 } } },
+};
+
 /**
  * Habilidades ativas (tecla G). O servidor resolve quem é atingido.
  *  area: 'self' = em volta do jogador, 'target' = em volta do alvo (precisa de alvo no alcance)
@@ -112,7 +119,7 @@ export function canRaise(c, id) {
  * Atributos finais do personagem (classe + pontos da árvore).
  * Tudo que depende de classe/habilidades passa por aqui: vida, defesa, dano, crítico, alcance, velocidade.
  */
-export function statsOf(c) {
+export function statsOf(c, now = Date.now()) {
   const s = {
     hpMul: 1, def: 0, dmg: { melee: 1, ranged: 1, magic: 1 }, crit: 0.15, critMul: 2, range: 0,
     cdMul: { melee: 1, ranged: 1, magic: 1 }, splashR: 0, splashPct: 0, speed: 1, dodge: 0,
@@ -140,5 +147,6 @@ export function statsOf(c) {
     for (const st of ['melee', 'ranged', 'magic']) if (b.cdMul?.[st]) s.cdMul[st] *= b.cdMul[st];
     for (const n of TREES[c.cls]) add(n.eff, c.skills?.[n.id] || 0);
   }
+  if (c.buffs) for (const [id, until] of Object.entries(c.buffs)) if (until > now && BUFFS[id]) add(BUFFS[id].eff);
   return s;
 }

@@ -1,7 +1,8 @@
 // Visual dos monstros. Os dados vêm de uma MobSim local (offline) ou do servidor (online);
 // em ambos os casos chegam os mesmos eventos ({e:'attack'|'hurt'|...}).
 import * as THREE from 'three';
-import { createCharacter, animateCharacter, flash } from './character.js';
+import { createCharacter, animateCharacter, flash, setWeapon } from './character.js';
+import { ITEMS } from './items.js';
 import { makeLabel } from './world.js';
 import { MobSim, TYPES, TYPE_IDS, STATES, WILD, inArc } from './shared/mobs.js';
 import { playerAttack, playerSkill } from './shared/combatRules.js';
@@ -70,7 +71,95 @@ function pickaxe(c, s) {
   c.materials.push(head.material);
 }
 
+/** Fantasma: lençol translúcido que flutua (sem pernas), braços e olhos brilhando. queen = Rainha Espectral */
+function buildGhost(queen = false) {
+  const root = new THREE.Group();
+  const body = new THREE.Group(); root.add(body);
+  const s = queen ? 1.8 : 1;
+  const tint = queen ? 0xc9a6ff : 0xdff3ff;
+  const mat = new THREE.MeshLambertMaterial({ color: tint, emissive: queen ? 0x3a1f5c : 0x1f3a4a, transparent: true, opacity: 0.72, depthWrite: false });
+  const sheet = part(new THREE.CylinderGeometry(0.55 * s, 0.85 * s, 1.7 * s, 8, 1, true), mat, 0, 1.05 * s, 0);
+  sheet.material.side = THREE.DoubleSide;
+  const head = part(new THREE.SphereGeometry(0.55 * s, 10, 8), mat, 0, 2.0 * s, 0);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: queen ? 0xff4fd8 : 0x2a6bff });
+  for (const x of [-0.18, 0.18]) body.add(part(new THREE.SphereGeometry(0.09 * s, 6, 6), eyeMat, x * s, 2.05 * s, 0.48 * s));
+  const mouth = part(new THREE.BoxGeometry(0.22 * s, 0.14 * s, 0.05), new THREE.MeshBasicMaterial({ color: 0x0a0a14 }), 0, 1.82 * s, 0.5 * s);
+  const armL = part(new THREE.BoxGeometry(0.18 * s, 0.9 * s, 0.18 * s), mat, -0.7 * s, 1.5 * s, 0.1);
+  const armR = part(new THREE.BoxGeometry(0.18 * s, 0.9 * s, 0.18 * s), mat, 0.7 * s, 1.5 * s, 0.1);
+  armL.rotation.x = armR.rotation.x = -1.1;
+  body.add(sheet, head, mouth, armL, armR);
+  if (queen) { // coroa de espinhos e cabelo espectral
+    const gold = new THREE.MeshBasicMaterial({ color: 0xffd65c });
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const sp = part(new THREE.ConeGeometry(0.1, 0.45, 4), gold, Math.cos(a) * 0.45, 2.75 * 1.18, Math.sin(a) * 0.45);
+      body.add(sp);
+    }
+    for (let i = 0; i < 5; i++) body.add(part(new THREE.BoxGeometry(0.12, 1.4, 0.08), mat, -0.5 + i * 0.25, 2.6, -0.55));
+  }
+  // sem PointLight: luzes que aparecem/somem com o monstro obrigam o three.js a recompilar os shaders (engasgos)
+  return { root, body, materials: [mat], ghost: true, armL, armR };
+}
+
+/** Lobo cinzento: corpo de blocos, 4 patas, focinho e rabo */
+function buildWolf() {
+  const root = new THREE.Group();
+  const body = new THREE.Group(); root.add(body);
+  const fur = lambert(0x6d6e70), dark = lambert(0x47484b), light = lambert(0xb9b8b2);
+  body.add(part(new THREE.BoxGeometry(0.8, 0.7, 1.7), fur, 0, 1.0, 0));
+  const head = new THREE.Group();
+  head.position.set(0, 1.35, 0.95);
+  head.add(part(new THREE.BoxGeometry(0.62, 0.55, 0.6), fur, 0, 0, 0));
+  head.add(part(new THREE.BoxGeometry(0.34, 0.28, 0.42), light, 0, -0.1, 0.45));
+  head.add(part(new THREE.BoxGeometry(0.1, 0.08, 0.05), new THREE.MeshBasicMaterial({ color: 0x111111 }), 0, -0.02, 0.67));
+  for (const x of [-0.2, 0.2]) {
+    head.add(part(new THREE.BoxGeometry(0.14, 0.26, 0.1), dark, x, 0.38, -0.05));
+    head.add(part(new THREE.BoxGeometry(0.09, 0.07, 0.04), new THREE.MeshBasicMaterial({ color: 0xffd23a }), x * 0.8, 0.1, 0.31));
+  }
+  body.add(head);
+  const tail = part(new THREE.BoxGeometry(0.2, 0.2, 0.8), dark, 0, 1.15, -1.1);
+  tail.rotation.x = 0.6; body.add(tail);
+  const legs = [];
+  for (const [x, z] of [[-0.28, 0.6], [0.28, 0.6], [-0.28, -0.6], [0.28, -0.6]]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(x, 0.75, z);
+    pivot.add(part(new THREE.BoxGeometry(0.2, 0.75, 0.2), dark, 0, -0.37, 0));
+    body.add(pivot); legs.push(pivot);
+  }
+  const materials = [fur, dark, light];
+  return { root, body, materials, wolf: true, legs, head, tail };
+}
+
 function buildModel(type) {
+  if (type === 'ghost' || type === 'banshee') return buildGhost(type === 'banshee');
+  if (type === 'wolf') return buildWolf();
+  if (type === 'cultist' || type === 'necromancer') {
+    const boss = type === 'necromancer';
+    const c = createCharacter({
+      skin: boss ? 0x9aa89a : 0xd9c2a5, shirt: boss ? 0x1c1a22 : 0x4a1f5c, pants: boss ? 0x141218 : 0x3a1748, hair: null,
+      eyes: boss ? 0x5cff7a : 0xff3b3b, scale: boss ? 1.75 : 1, weapon: true,
+    });
+    const s = 0.5 * (boss ? 1.75 : 1);
+    const hood = part(new THREE.BoxGeometry(1.32 * s, 0.9 * s, 1.32 * s), lambert(boss ? 0x0e0c12 : 0x351340), 0, 0.3 * s, -0.08 * s);
+    c.head.add(hood); c.materials.push(hood.material);
+    if (boss) { // coroa de ossos
+      for (let i = 0; i < 5; i++) c.head.add(part(new THREE.BoxGeometry(0.14 * s, 0.5 * s, 0.14 * s), lambert(0xeee6cf), (-0.5 + i * 0.25) * s, 0.95 * s, 0.4 * s));
+    }
+    setWeapon(c, { ...ITEMS.apprentice_staff, color: boss ? 0x5cff7a : 0xb46bff });
+    return c;
+  }
+  if (type === 'gargoyle') {
+    const c = createCharacter({ skin: 0x7c7f86, shirt: 0x6b6e75, pants: 0x5d6067, hair: null, eyes: 0xffa020, scale: 1.35 });
+    const s = 0.5 * 1.35, stone = lambert(0x5f6269);
+    for (const side of [-1, 1]) { // asas de pedra
+      const w = part(new THREE.BoxGeometry(1.6 * s, 1.5 * s, 0.12 * s), stone, side * 0.95 * s, 2.6 * s, -0.55 * s);
+      w.rotation.set(0.2, side * 0.5, side * -0.35);
+      c.body.add(w);
+      c.head.add(part(new THREE.ConeGeometry(0.14 * s, 0.5 * s, 4), stone, side * 0.42 * s, 0.6 * s, 0));
+    }
+    c.materials.push(stone);
+    return c;
+  }
   if (type === 'slime') {
     const root = new THREE.Group();
     const body = new THREE.Group(); root.add(body);
@@ -135,6 +224,15 @@ function makeHpBar(width) {
 
 const rockGeo = new THREE.DodecahedronGeometry(0.8, 0);
 const rockMat = new THREE.MeshLambertMaterial({ color: 0x7d7468 });
+/** orbe de feitiço (cultista/Necromante: roxo-verde) ou grito espectral (Rainha: rosa) */
+function orbMesh(kind) {
+  const color = kind === 'spirit' ? 0xff6fe0 : 0x9b5cff;
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.4, 0), new THREE.MeshBasicMaterial({ color })));
+  const halo = new THREE.Mesh(new THREE.IcosahedronGeometry(0.75, 0), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, depthWrite: false }));
+  g.add(halo);
+  return g;
+}
 /** banana de dinamite (projétil do Goblin Minerador) */
 function dynamiteMesh() {
   const g = new THREE.Group();
@@ -312,7 +410,7 @@ export class EnemyManager {
 
   // ---------- Pedra do Golem (visual) ----------
   spawnRock(ev) {
-    const mesh = ev.kind === 'dynamite' ? dynamiteMesh() : new THREE.Mesh(rockGeo, rockMat);
+    const mesh = ev.kind === 'dynamite' ? dynamiteMesh() : ev.kind === 'bolt' || ev.kind === 'spirit' ? orbMesh(ev.kind) : new THREE.Mesh(rockGeo, rockMat);
     mesh.castShadow = true;
     const from = new THREE.Vector3(ev.fx, ev.fy, ev.fz);
     const to = new THREE.Vector3(ev.tx, 0, ev.tz);
@@ -396,6 +494,18 @@ export class EnemyManager {
         const hop = Math.abs(Math.sin(v.t * (v.moving ? 8 : 3)));
         model.body.position.y = v.moving ? hop * 0.6 : 0;
         model.body.scale.set(1 + (1 - hop) * 0.15, 1 - (1 - hop) * 0.15 + v.attackAnim * 0.3, 1 + (1 - hop) * 0.15);
+      } else if (model.ghost) { // flutua balançando; avança os braços no ataque
+        model.body.position.y = 0.45 + Math.sin(v.t * 2.2 + v.id) * 0.25;
+        model.body.rotation.z = Math.sin(v.t * 1.3 + v.id) * 0.08;
+        model.armL.rotation.x = model.armR.rotation.x = -1.1 - v.attackAnim * 0.9;
+        model.body.position.z = v.attackAnim * 0.4;
+      } else if (model.wolf) { // galope; bote no ataque
+        const sp = v.moving ? 16 : 3;
+        model.legs.forEach((l, i) => { l.rotation.x = Math.sin(v.t * sp + (i < 2 ? 0 : Math.PI)) * (v.moving ? 0.7 : 0.05); });
+        model.body.position.y = v.moving ? Math.abs(Math.sin(v.t * sp)) * 0.12 : 0;
+        model.tail.rotation.y = Math.sin(v.t * 6) * 0.4;
+        model.body.position.z = v.attackAnim * 0.6;
+        model.head.rotation.x = -v.attackAnim * 0.4;
       } else if (model.spider) { // patas mexendo e bote para frente no ataque
         const sp = v.moving ? 22 : 4;
         model.legs.forEach((l, i) => { l.rotation.x = Math.sin(v.t * sp + i * 1.3) * (v.moving ? 0.45 : 0.1); });

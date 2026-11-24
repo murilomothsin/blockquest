@@ -7,17 +7,20 @@
 //   {k:'log', text, cls} {k:'sfx', name, at?} {k:'float', text, color, size, at?, h?} {k:'levelUp', level}
 //   {k:'loot', lid, item, n?, x, z} {k:'lootGone', lid} {k:'hurt', dmg} {k:'death', by, lost, pct, items, resetAt}
 //   {k:'respawn', pos} {k:'heal', n, color} {k:'pickup', item, n?} {k:'equip', item} {k:'closeDialog'}
-//   {k:'teleport', x, z, region} {k:'chest', id} {k:'classChosen', cls} {k:'skillUp', node}
+//   {k:'teleport', x, z, region} {k:'chest', id} {k:'classChosen', cls} {k:'skillUp', node} {k:'buff', id, until}
 import { ITEMS, SLOTS, rollDrop, rollTreasure, damageReduction } from './items.js';
 import { QUESTS } from './quests.js';
 import { TYPES } from './mobs.js';
 import {
-  NPCS, WELL, INTERACT_RANGE, SPAWN_POINT, TREASURES, TREASURE_RESPAWN, HOME_DOOR, HOME_ENTRY, HOME_EXIT,
-  HOME_FURNITURE, MINE_DOOR, MINE_ENTRY, MINE_EXIT, inHome,
+  NPCS, WELLS, INTERACT_RANGE, SPAWN_POINT, TREASURES, TREASURE_RESPAWN, HOME_FURNITURE, DOOR_BY_ID, inHome,
 } from './worldData.js';
 import {
-  CLASSES, CLASS_LEVEL, TREES, RESPEC_COST, statsOf, canRaise, nodeOf, skillPointsFree,
+  CLASSES, CLASS_LEVEL, TREES, RESPEC_COST, BUFFS, statsOf, canRaise, nodeOf, skillPointsFree,
 } from './classes.js';
+
+/** quem dá cada missão (NPC) */
+export const questGiver = (qd) => NPCS[qd?.giver || 'elder'];
+const SHOPS = Object.values(NPCS).filter((n) => n.role === 'shop');
 
 export const HP_BASE = 100;
 export const HP_PER_LEVEL = 15;
@@ -45,7 +48,7 @@ export function newCharacter() {
     level: 1, xp: 0, gold: 10, maxHp: HP_BASE, hp: HP_BASE, kills: 0,
     inv: { potion: 3, wood_sword: 1 }, equipped: 'wood_sword', armor: null, helmet: null,
     quest: { idx: 0, status: 'available', progress: 0 }, pos: [...SPAWN_POINT],
-    cls: null, skills: {}, chests: {}, home: { rack: {}, chest: {}, safe: 0 }, deaths: { period: 0, n: 0 },
+    cls: null, skills: {}, chests: {}, home: { rack: {}, chest: {}, safe: 0 }, deaths: { period: 0, n: 0 }, buffs: {},
   };
 }
 
@@ -72,6 +75,7 @@ export function normalizeCharacter(d) {
     progress: int(q.progress, 0, 1000, 0),
   };
   if (quest.idx >= QUESTS.length) quest.status = 'done';
+  else if (quest.status === 'done') quest.status = 'available'; // missões novas depois de terminar todas
   const cls = CLASSES[d.cls] && level >= CLASS_LEVEL ? d.cls : null;
   const skills = {};
   if (cls && d.skills && typeof d.skills === 'object') {
@@ -90,11 +94,15 @@ export function normalizeCharacter(d) {
     armor: ITEMS[d.armor]?.kind === 'armor' && inv[d.armor] ? d.armor : null,
     helmet: ITEMS[d.helmet]?.kind === 'helmet' && inv[d.helmet] ? d.helmet : null,
     quest,
-    pos: Array.isArray(d.pos) ? [num(d.pos[0], -700, 700, 0), 0, num(d.pos[2], -700, 700, 8)] : [...SPAWN_POINT],
+    pos: Array.isArray(d.pos) ? [num(d.pos[0], -1000, 1000, 0), 0, num(d.pos[2], -1000, 1000, 8)] : [...SPAWN_POINT],
     cls, skills, chests,
     home: { rack: cleanBag(h.rack, gearOk), chest: cleanBag(h.chest, potionOk), safe: int(h.safe, 0, 1e9, 0) },
     deaths: { period: int(d.deaths?.period, 0, 1e7, 0), n: int(d.deaths?.n, 0, 1000, 0) },
+    buffs: {},
   };
+  if (d.buffs && typeof d.buffs === 'object') { // pergaminhos ainda valendo
+    for (const [id, until] of Object.entries(d.buffs)) if (BUFFS[id] && Number.isFinite(until) && until > now && until < now + 600e3) c.buffs[id] = until;
+  }
   // pontos gastos a mais que o nível permite (ex.: nível alterado por teste): zera a árvore
   if (skillPointsFree(c) < 0) c.skills = {};
   c.maxHp = maxHpOf(c);
@@ -106,17 +114,18 @@ export function normalizeCharacter(d) {
 
 /** Só o que vai para o cliente / banco (sem campos de runtime) */
 export function publicCharacter(c) {
-  const { level, xp, gold, maxHp, hp, kills, inv, equipped, armor, helmet, quest, pos, cls, skills, chests, home, deaths } = c;
+  const { level, xp, gold, maxHp, hp, kills, inv, equipped, armor, helmet, quest, pos, cls, skills, chests, home, deaths, buffs } = c;
   return {
     level, xp, gold, maxHp, hp: Math.ceil(hp), kills, inv: { ...inv }, equipped, armor, helmet, quest: { ...quest }, pos: [...pos],
     cls: cls || null, skills: { ...skills }, chests: { ...chests },
-    home: { rack: { ...home.rack }, chest: { ...home.chest }, safe: home.safe }, deaths: { ...deaths },
+    home: { rack: { ...home.rack }, chest: { ...home.chest }, safe: home.safe }, deaths: { ...deaths }, buffs: { ...(buffs || {}) },
   };
 }
 
 const addItem = (bag, id, n = 1) => { bag[id] = (bag[id] || 0) + n; };
 const removeItem = (bag, id, n = 1) => { bag[id] = (bag[id] || 0) - n; if (bag[id] <= 0) delete bag[id]; };
 const near = (pos, x, z, r) => pos && Math.hypot(pos.x - x, pos.z - z) <= r;
+const nearShop = (pos) => SHOPS.some((n) => near(pos, n.x, n.z, INTERACT_RANGE.npc));
 
 /** vida máxima mudou (nível, classe, árvore): ganha a diferença, nunca cura além disso */
 function recalcHp(c) {
@@ -197,7 +206,8 @@ export function kill(c, type, at, ctx, fx) {
     if (q.progress >= qd.count) {
       q.status = 'complete';
       fx.push({ k: 'sfx', name: 'quest' });
-      fx.push({ k: 'log', text: `Missão concluída! Volte ao ${NPCS.elder.name}.`, cls: 'info' });
+      const giver = questGiver(qd);
+      fx.push({ k: 'log', text: `Missão concluída! Volte para ${giver.title} ${giver.where}.`, cls: 'info' });
     }
   }
   gainXp(c, def.xp, fx);
@@ -234,6 +244,7 @@ export function hurt(c, dmg, type, ctx, fx) {
     if (!novice) { // perde tudo o que carrega
       items = Object.values(c.inv).reduce((s, n) => s + n, 0) - (c.inv.wood_sword && c.equipped === 'wood_sword' ? 1 : 0);
       c.inv = { wood_sword: 1 };
+      c.buffs = {};
       c.equipped = 'wood_sword'; c.armor = null; c.helmet = null;
     }
     fx.push({ k: 'death', by: TYPES[type]?.name || 'um monstro', lost, pct, items: Math.max(0, items), novice, resetAt: (period + 1) * DEATH_PERIOD_MS });
@@ -275,7 +286,7 @@ export function act(c, a, ctx, fx) {
   switch (a.a) {
     case 'buy': {
       if (!it || !it.price) return deny(fx);
-      if (!near(ctx.pos, NPCS.merchant.x, NPCS.merchant.z, INTERACT_RANGE.npc)) return deny(fx, 'Vá até a Mercadora Lia para comprar.');
+      if (!nearShop(ctx.pos)) return deny(fx, 'Vá até uma loja (Mercadora Lia na vila ou Ferreiro Duarte no castelo) para comprar.');
       if (c.gold < it.price) return deny(fx);
       c.gold -= it.price;
       addItem(c.inv, a.id);
@@ -285,7 +296,7 @@ export function act(c, a, ctx, fx) {
     }
     case 'sell': {
       if (!it || !c.inv[a.id]) return deny(fx);
-      if (!near(ctx.pos, NPCS.merchant.x, NPCS.merchant.z, INTERACT_RANGE.npc)) return deny(fx, 'Vá até a Mercadora Lia para vender.');
+      if (!nearShop(ctx.pos)) return deny(fx, 'Vá até uma loja para vender.');
       if (isEquipped(c, a.id) && c.inv[a.id] <= 1) return deny(fx, 'Não dá para vender o item que você está usando.');
       removeItem(c.inv, a.id);
       c.gold += it.sell;
@@ -302,7 +313,22 @@ export function act(c, a, ctx, fx) {
     }
     case 'use': {
       if (!it || it.kind !== 'consumable') return false;
-      if (!c.inv[a.id]) return deny(fx, `Sem ${it.name}! Compre com a Mercadora Lia.`);
+      if (!c.inv[a.id]) return deny(fx, `Sem ${it.name}! Compre numa loja.`);
+      if (it.sub === 'scroll') { // pergaminho: uso único
+        removeItem(c.inv, a.id);
+        if (it.tp === 'village') {
+          fx.push({ k: 'sfx', name: 'levelUp' }, { k: 'teleport', x: SPAWN_POINT[0], z: SPAWN_POINT[2], region: 'world' },
+            { k: 'log', text: `${it.icon} O pergaminho se desfaz em luz... você está de volta à Vila Pedraverde.`, cls: 'good' });
+        } else if (BUFFS[it.buff]) {
+          const B = BUFFS[it.buff];
+          c.buffs = c.buffs || {};
+          c.buffs[it.buff] = clock + B.secs * 1000;
+          fx.push({ k: 'sfx', name: 'quest' }, { k: 'buff', id: it.buff, until: c.buffs[it.buff] },
+            { k: 'float', text: `${B.icon} ${B.name}!`, color: '#ffe08a', size: 20 },
+            { k: 'log', text: `${it.icon} ${B.name} por ${B.secs} s.`, cls: 'good' });
+        }
+        return true;
+      }
       if (c.hp >= c.maxHp) { fx.push({ k: 'sfx', name: 'deny' }, { k: 'log', text: 'Vida já está cheia.', cls: 'info' }); return false; }
       removeItem(c.inv, a.id);
       const heal = Math.round(c.maxHp * it.heal);
@@ -311,18 +337,20 @@ export function act(c, a, ctx, fx) {
       return true;
     }
     case 'well': {
-      if (!near(ctx.pos, WELL.x, WELL.z, INTERACT_RANGE.well)) return deny(fx);
+      const w = WELLS.find((ww) => near(ctx.pos, ww.x, ww.z, INTERACT_RANGE.well));
+      if (!w) return deny(fx);
       if (c.hp >= c.maxHp) return deny(fx);
       const healed = Math.round(c.maxHp - c.hp);
       c.hp = c.maxHp;
       fx.push({ k: 'sfx', name: 'potion' }, { k: 'heal', n: healed, color: '#7dd8ff' },
-        { k: 'log', text: '💧 Você bebeu a água do poço e recuperou toda a vida.', cls: 'good' });
+        { k: 'log', text: `💧 Você bebeu a água da ${w.name} e recuperou toda a vida.`, cls: 'good' });
       return true;
     }
     case 'quest_accept': {
       const q = c.quest, qd = QUESTS[q.idx];
       if (q.status !== 'available' || !qd) return false;
-      if (!near(ctx.pos, NPCS.elder.x, NPCS.elder.z, INTERACT_RANGE.npc)) return deny(fx);
+      const g = questGiver(qd);
+      if (!near(ctx.pos, g.x, g.z, INTERACT_RANGE.npc)) return deny(fx);
       q.status = 'active'; q.progress = 0;
       fx.push({ k: 'sfx', name: 'quest' }, { k: 'log', text: `Missão aceita: ${qd.title}`, cls: 'info' }, { k: 'closeDialog' });
       return true;
@@ -330,7 +358,8 @@ export function act(c, a, ctx, fx) {
     case 'quest_turnin': {
       const q = c.quest, qd = QUESTS[q.idx];
       if (q.status !== 'complete' || !qd) return false;
-      if (!near(ctx.pos, NPCS.elder.x, NPCS.elder.z, INTERACT_RANGE.npc)) return deny(fx);
+      const g = questGiver(qd);
+      if (!near(ctx.pos, g.x, g.z, INTERACT_RANGE.npc)) return deny(fx);
       const r = qd.reward;
       c.gold += r.gold || 0;
       const got = [];
@@ -386,25 +415,17 @@ export function act(c, a, ctx, fx) {
       return true;
     }
 
-    // ---------- portas ----------
-    case 'enter_mine':
-      if (!near(ctx.pos, MINE_DOOR.x, MINE_DOOR.z, INTERACT_RANGE.door + 1)) return deny(fx);
-      fx.push({ k: 'teleport', x: MINE_ENTRY.x, z: MINE_ENTRY.z, region: 'mine' }, { k: 'log', text: '⛏️ Você entrou na Mina Abandonada. Cuidado com o escuro...', cls: 'info' });
-      return true;
-    case 'leave_mine': {
-      if (!near(ctx.pos, MINE_EXIT.x, MINE_EXIT.z, INTERACT_RANGE.door + 1)) return deny(fx);
-      const r = Math.hypot(MINE_DOOR.x, MINE_DOOR.z);
-      fx.push({ k: 'teleport', x: MINE_DOOR.x - (MINE_DOOR.x / r) * 3, z: MINE_DOOR.z - (MINE_DOOR.z / r) * 3, region: 'world' });
+    // ---------- portas, escadas e saídas (tabela DOORS em worldData) ----------
+    case 'enter_mine': case 'leave_mine': case 'enter_home': case 'leave_home': // nomes antigos
+      return act(c, { a: 'door', id: { enter_mine: 'mine_in', leave_mine: 'mine_out', enter_home: 'home_in', leave_home: 'home_out' }[a.a] }, ctx, fx);
+    case 'door': {
+      const d = DOOR_BY_ID[a.id];
+      if (!d) return false;
+      if (!near(ctx.pos, d.at.x, d.at.z, d.r)) return deny(fx);
+      fx.push({ k: 'teleport', x: d.to.x, z: d.to.z, door: d.id });
+      if (d.log) fx.push({ k: 'log', text: d.log, cls: 'info' });
       return true;
     }
-    case 'enter_home':
-      if (!near(ctx.pos, HOME_DOOR.x, HOME_DOOR.z, INTERACT_RANGE.door)) return deny(fx);
-      fx.push({ k: 'teleport', x: HOME_ENTRY.x, z: HOME_ENTRY.z, region: 'home' }, { k: 'log', text: '🏠 Bem-vindo à sua casa.', cls: 'info' });
-      return true;
-    case 'leave_home':
-      if (!near(ctx.pos, HOME_EXIT.x, HOME_EXIT.z, INTERACT_RANGE.door)) return deny(fx);
-      fx.push({ k: 'teleport', x: HOME_DOOR.x, z: HOME_DOOR.z, region: 'world' });
-      return true;
 
     // ---------- casa: armário (equipamento), baú (poções), cofre (ouro) ----------
     case 'store': case 'take': {
@@ -412,7 +433,7 @@ export function act(c, a, ctx, fx) {
       const f = HOME_FURNITURE[box];
       if (!f || (box !== 'rack' && box !== 'chest')) return false;
       if (!inHome(ctx.pos?.x, ctx.pos?.z) || !near(ctx.pos, f.x, f.z, INTERACT_RANGE.furniture)) return deny(fx, `Chegue perto do ${f.name}.`);
-      if (!it || (box === 'rack' ? !gearOk(it) : !potionOk(it))) return deny(fx, box === 'rack' ? 'O armário guarda só armas e armaduras.' : 'O baú guarda só poções.');
+      if (!it || (box === 'rack' ? !gearOk(it) : !potionOk(it))) return deny(fx, box === 'rack' ? 'O armário guarda só armas e armaduras.' : 'O baú guarda só poções e pergaminhos.');
       const bag = c.home[box];
       if (a.a === 'store') {
         if (!c.inv[a.id]) return false;

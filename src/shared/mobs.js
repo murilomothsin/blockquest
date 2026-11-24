@@ -1,6 +1,6 @@
 // Simulação dos monstros em dados puros (sem three.js / DOM).
 // Roda no navegador no modo offline e no servidor no modo online — a mesma IA nos dois.
-import { SAFE_ZONE, MINE_SPAWNS, ZONES } from './worldData.js';
+import { SAFE_ZONES, DUNGEON_SPAWNS, ZONES, CURSED, TOWER } from './worldData.js';
 
 /**
  * Encontros selvagens estilo Pokémon GBA: andando no meio das árvores, a cada
@@ -35,6 +35,23 @@ export const TYPES = {
     // joga dinamite: área marcada no chão, maior que a pedra do golem
     throw: { min: 6, max: 30, cd: 5, dmg: 30, radius: 3.5, windup: 0.9, flight: 1.1, kind: 'dynamite' },
   },
+  // --- planalto, ruínas amaldiçoadas e torre (nível 9+) ---
+  wolf: { name: 'Lobo Cinzento', hp: 780, dmg: 22, speed: 5.4, xp: 70, gold: [6, 14], aggro: 14, range: 1.8, cd: 0.95, respawn: 25, radius: 0.7, height: 1.3, leash: 45 },
+  ghost: { name: 'Fantasma', hp: 900, dmg: 26, speed: 3.8, xp: 90, gold: [10, 20], aggro: 13, range: 2.0, cd: 1.2, respawn: 30, radius: 0.6, height: 2.4, leash: 40, los: true, float: true },
+  banshee: {
+    name: 'Rainha Espectral', hp: 6500, dmg: 46, speed: 3.4, xp: 2000, gold: [450, 650], aggro: 18, range: 3.2, cd: 1.8, respawn: 150, radius: 1.3, height: 4.6, boss: true, leash: 40, float: true,
+    // grito espectral: orbe que cai numa área marcada
+    throw: { min: 5, max: 30, cd: 4, dmg: 34, radius: 3.2, windup: 0.8, flight: 1.0, kind: 'spirit' },
+  },
+  cultist: {
+    name: 'Cultista', hp: 1000, dmg: 24, speed: 3.3, xp: 110, gold: [12, 24], aggro: 15, range: 2.0, cd: 1.3, respawn: 35, radius: 0.6, height: 2.4, leash: 40, los: true,
+    throw: { min: 4, max: 18, cd: 3.2, dmg: 22, radius: 2.2, windup: 0.6, flight: 0.8, kind: 'bolt' }, // feitiço à distância
+  },
+  gargoyle: { name: 'Gárgula', hp: 2000, dmg: 38, speed: 2.7, xp: 160, gold: [14, 28], aggro: 11, range: 2.4, cd: 1.6, respawn: 40, radius: 0.9, height: 3.2, leash: 35, los: true },
+  necromancer: {
+    name: 'Necromante', hp: 10000, dmg: 54, speed: 2.8, xp: 3500, gold: [700, 1000], aggro: 18, range: 3.0, cd: 1.9, respawn: 180, radius: 1.2, height: 4.4, boss: true, leash: 30, los: true,
+    throw: { min: 4, max: 30, cd: 3.6, dmg: 40, radius: 3.4, windup: 0.9, flight: 1.0, kind: 'bolt' },
+  },
 };
 export const TYPE_IDS = Object.keys(TYPES);
 export const STATES = ['idle', 'chase', 'return', 'dead'];
@@ -50,8 +67,21 @@ export const SPAWNS = [
   { type: 'spider', x: Z('swamp').x, z: Z('swamp').z, r: 18, n: 5 },
   { type: 'zombie', x: Z('swamp').x + 8, z: Z('swamp').z - 6, r: 14, n: 3 },
   { type: 'cave_goblin', x: Z('quarry').x, z: Z('quarry').z, r: 12, n: 3 },
-  // mina: um monstro por marcador do mapa
-  ...MINE_SPAWNS.map((m) => ({ type: m.type, x: m.x, z: m.z, r: 0.5, n: 1 })),
+  // anel externo (mapa maior)
+  { type: 'skeleton', x: 235, z: -62, r: 14, n: 4 },
+  { type: 'spider', x: -222, z: 104, r: 14, n: 4 },
+  { type: 'zombie', x: -214, z: 92, r: 10, n: 2 },
+  { type: 'cave_goblin', x: -200, z: -150, r: 12, n: 3 },
+  // planalto: lobos em volta do castelo
+  { type: 'wolf', x: Z('wolves').x, z: Z('wolves').z, r: 16, n: 6 },
+  { type: 'wolf', x: -10, z: -232, r: 14, n: 4 },
+  // terras amaldiçoadas: fantasmas nas ruínas, a Rainha Espectral na frente da cripta
+  { type: 'ghost', x: CURSED.x, z: CURSED.z, r: 20, n: 8 },
+  { type: 'banshee', x: CURSED.x, z: CURSED.z - 10, r: 1, n: 1 },
+  { type: 'skeleton', x: 150, z: 200, r: 12, n: 4 },
+  { type: 'ghost', x: TOWER.x + 4, z: TOWER.z - 28, r: 10, n: 3 },
+  // dungeons (mina e andares da torre): um monstro por marcador do mapa
+  ...DUNGEON_SPAWNS.map((m) => ({ type: m.type, x: m.x, z: m.z, r: 0.5, n: 1 })),
 ];
 
 const REGEN_DELAY = 12; // s sem levar dano antes de regenerar
@@ -276,9 +306,11 @@ export class MobSim {
         m.moving = Math.min(1, speed / def.speed);
         this.world.resolve(m, def.radius);
         // monstros não entram na zona segura
-        const sx = m.x - SAFE_ZONE.x, sz = m.z - SAFE_ZONE.z, sd = Math.hypot(sx, sz);
-        const edge = SAFE_ZONE.r + def.radius;
-        if (sd < edge && sd > 1e-3) { m.x = SAFE_ZONE.x + (sx / sd) * edge; m.z = SAFE_ZONE.z + (sz / sd) * edge; }
+        for (const S of SAFE_ZONES) {
+          const sx = m.x - S.x, sz = m.z - S.z, sd = Math.hypot(sx, sz);
+          const edge = S.r + def.radius;
+          if (sd < edge && sd > 1e-3) { m.x = S.x + (sx / sd) * edge; m.z = S.z + (sz / sd) * edge; }
+        }
       }
     }
 

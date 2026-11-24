@@ -6,7 +6,7 @@ import { TYPES, SPAWNS } from '../src/shared/mobs.js';
 import { CLASSES, TREES, SKILLS, statsOf } from '../src/shared/classes.js';
 import { xpToNext, maxHpOf, defenseOf } from '../src/shared/progress.js';
 import { attackCooldown, weaponRange, splashOf } from '../src/shared/combatRules.js';
-import { MINE_SPAWNS, MINE_ROOM_CENTERS } from '../src/shared/worldData.js';
+import { MINE_SPAWNS, MINE_ROOM_CENTERS, DUNGEON_SPAWNS, dungeonAt } from '../src/shared/worldData.js';
 import { QUESTS } from '../src/shared/quests.js';
 
 const r1 = (n) => Math.round(n * 10) / 10;
@@ -122,14 +122,16 @@ log([2, 3, 4, 5, 6, 8, 10, 12].map((l) => `Nv${l}: ${cumXp[l]}`).join(' · '));
 {
   let xp = 0; const lv = () => { let l = 1; while (cumXp[l + 1] <= xp) l++; return l; };
   const stages = [];
-  const path = [['slimes', 'slime', 10], ['goblins', 'goblin', 10], ['golem', 'skeleton', 12], ['mina', 'cave_goblin', 0]];
+  const path = [['slimes', 'slime', 10], ['goblins', 'goblin', 10], ['golem', 'skeleton', 12], ['mina', 'cave_goblin', 0],
+    ['lobos', 'wolf', 6], ['fantasmas', 'ghost', 6], ['rainha', 'skeleton', 8], ['torre', 'cultist', 0]];
   for (const [qid, farm, n] of path) {
     const q = QUESTS.find((x) => x.id === qid);
     stages.push(`${qid}: chega no Nv${lv()}`);
     xp += n * TYPES[farm].xp + q.count * TYPES[q.target].xp + q.reward.xp;
+    if (qid === 'torre') { const tw = DUNGEON_SPAWNS.filter((s) => dungeonAt(s.x, s.z)?.region === 'tower'); xp += tw.reduce((s, m) => s + TYPES[m.type].xp, 0) - TYPES.cultist.xp * 0; }
     if (qid === 'golem') { stages.push(`biomas antes da mina: Nv${lv()}`); xp += 6 * TYPES.spider.xp + 6 * TYPES.zombie.xp + 4 * TYPES.cave_goblin.xp; }
   }
-  stages.push(`depois do chefe da mina: Nv${lv()}`);
+  stages.push(`fim da torre: Nv${lv()}`);
   log('Progressão típica (missões + abates no caminho): ' + stages.join(' · '));
 }
 
@@ -141,7 +143,8 @@ for (const k of ['nenhuma', ...CLS]) {
 
 log('\n== Um contra um: segundos para matar / % da vida perdida (Nv típico da área) ==');
 // nível em que o jogador normalmente encontra cada monstro (missões 1→4)
-const duel = [['slime', 2], ['goblin', 3], ['spider', 5], ['skeleton', 5], ['cave_goblin', 6], ['zombie', 6], ['golem', 5], ['golem', 6], ['goblin_boss', 7], ['goblin_boss', 8], ['goblin_boss', 10]];
+const duel = [['slime', 2], ['goblin', 3], ['spider', 5], ['skeleton', 5], ['cave_goblin', 6], ['zombie', 6], ['golem', 5], ['golem', 6], ['goblin_boss', 7], ['goblin_boss', 8], ['goblin_boss', 10],
+  ['wolf', 9], ['ghost', 10], ['banshee', 11], ['banshee', 12], ['cultist', 12], ['gargoyle', 12], ['necromancer', 13], ['necromancer', 14]];
 log(pad('monstro (nv)', 20) + CLS.map((k) => pad(k, 18)).join(''));
 for (const [t, l] of duel) {
   log(pad(`${t} (${l})`, 20) + CLS.map((k) => { const c = makeChar(k, l); const f = fight(c, [t]); return pad(`${r1(f.time)}s ${Math.round((f.taken / c.maxHp) * 100)}%`, 18); }).join(''));
@@ -166,6 +169,27 @@ for (const l of [6, 7, 8, 10]) {
     });
     const potions = Math.ceil(Math.max(0, total - c.maxHp) / (c.maxHp * 0.5));
     log(`${pad(k, 10)} ${cells.join(' ')}  | total ${Math.round(total)} de dano = ${r1(total / c.maxHp)}x a vida (~${potions} poções)`);
+  }
+}
+
+log('\n== Andares da torre (salas inteiras de uma vez = pior caso) — % da vida perdida ==');
+{
+  const floors = {};
+  for (const m of DUNGEON_SPAWNS) { const d = dungeonAt(m.x, m.z); if (d.region === 'tower') (floors[d.id] ||= []).push(m.type); }
+  for (const l of [12, 13, 14]) {
+    log(`-- nível ${l} --`);
+    for (const k of CLS) {
+      const c = makeChar(k, l);
+      // cada andar em grupos de 3 (o jogador puxa uma sala por vez)
+      const cells = Object.entries(floors).map(([id, g]) => {
+        let taken = 0;
+        const boss = g.filter((t) => TYPES[t].boss), rest = g.filter((t) => !TYPES[t].boss);
+        for (let i = 0; i < rest.length; i += 3) taken += fight(c, rest.slice(i, i + 3)).taken;
+        if (boss.length) taken += fight(c, boss).taken;
+        return `${id}:${r1(taken / c.maxHp)}x`;
+      });
+      log(`${pad(k, 10)} ${cells.join(' ')}`);
+    }
   }
 }
 

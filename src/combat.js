@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { inMine } from './shared/worldData.js';
+import { dungeonAt } from './shared/worldData.js';
 
 const SPEED = { arrow: 45, magic: 32 };
 
@@ -64,8 +64,8 @@ export class Projectiles {
         }
       }
       if (!done && pos.y < 4) {
-        done = inMine(pos.x, pos.z)
-          ? this.world.isBlocked(pos.x, pos.z) // paredes da mina
+        done = dungeonAt(pos.x, pos.z)
+          ? this.world.isBlocked(pos.x, pos.z) // paredes da mina/torre
           : this.world.colliders.some((c) => Math.hypot(pos.x - c.x, pos.z - c.z) < c.r);
         if (done) this.onWorld?.(pos.clone());
       }

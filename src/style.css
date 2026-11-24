@@ -6,6 +6,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-f
 .panel { background: rgba(15, 20, 35, .72); border: 2px solid rgba(255,255,255,.15); border-radius: 10px; padding: 10px 12px; }
 #hud { position: fixed; inset: 0; pointer-events: none; }
 #stats { position: absolute; top: 12px; left: 12px; width: 250px; }
+#buffs { position: absolute; top: 12px; left: 274px; display: flex; gap: 6px; pointer-events: none; }
+#buffs .buff { background: rgba(20,16,30,.78); border: 1px solid #ffd65c88; color: #ffe08a; border-radius: 8px; padding: 3px 7px; font: 700 12px system-ui; }
 #stats .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 #stats .row.small { justify-content: flex-start; font-size: 13px; margin: 6px 0 0; }
 .lvl { background: #f5b82e; color: #222; font-weight: 800; padding: 1px 8px; border-radius: 6px; font-size: 13px; }
@@ -262,6 +264,7 @@ body.touch #prompt { bottom: auto; top: 64px; font-size: 14px; }
   #stats .row { margin-bottom: 3px; }
   #stats .row.small { font-size: 11px; margin-top: 3px; }
   #stats #defense, #stats #weapon { display: none; }
+  #buffs { left: calc(204px + env(safe-area-inset-left)); top: calc(6px + env(safe-area-inset-top)); }
   #quest { width: 180px; right: 116px; top: 6px; font-size: 11px; padding: 6px 8px; }
   #quest h3 { font-size: 12px; }
   #quest p:nth-child(n+3) { display: none; }
