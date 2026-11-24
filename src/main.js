@@ -9,13 +9,16 @@ import { UI } from './ui.js';
 import { Projectiles } from './combat.js';
 import { Loot } from './loot.js';
 import { Sound } from './audio.js';
+import { startSession, logoutSession } from './net/session.js';
+import { Net } from './net/net.js';
+import { RemotePlayers } from './net/remote.js';
 
 // ---------- Render ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 document.getElementById('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -50,6 +53,11 @@ enemies.onWild = (e) => ui.log(`⚠️ Um ${e.def.name.toLowerCase()} saltou do 
 // clique em qualquer botão da interface
 document.addEventListener('click', (e) => { if (e.target.closest?.('button')) sfx('ui'); });
 
+// ---------- Conta (login online ou modo offline) ----------
+const session = await startSession();
+let net = null; // conexão com o servidor (só online)
+let remote = null; // outros jogadores
+
 // ---------- Save ----------
 const SAVE_KEY = 'blockquest-save-v2';
 const DEFAULTS = {
@@ -59,11 +67,15 @@ const DEFAULTS = {
 };
 function load() {
   try {
-    let s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
-    const old = !s && JSON.parse(localStorage.getItem('blockquest-save-v1') || 'null');
-    if (old) { // migra save antigo (weaponLvl/potions) para inventário
-      const eq = ['wood_sword', 'iron_sword', 'steel_sword', 'rune_blade'][old.weaponLvl || 0];
-      s = { ...old, inv: { potion: old.potions || 0, wood_sword: 1, [eq]: 1 }, equipped: eq };
+    let s;
+    if (session.online) s = session.save; // online: progresso vem do servidor (null = personagem novo)
+    else {
+      s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+      const old = !s && JSON.parse(localStorage.getItem('blockquest-save-v1') || 'null');
+      if (old) { // migra save antigo (weaponLvl/potions) para inventário
+        const eq = ['wood_sword', 'iron_sword', 'steel_sword', 'rune_blade'][old.weaponLvl || 0];
+        s = { ...old, inv: { potion: old.potions || 0, wood_sword: 1, [eq]: 1 }, equipped: eq };
+      }
     }
     const merged = { ...structuredClone(DEFAULTS), ...(s || {}) };
     if (!ITEMS[merged.equipped]) merged.equipped = 'wood_sword';
@@ -72,7 +84,9 @@ function load() {
 }
 function save() {
   const { level, xp, gold, maxHp, hp, kills, inv, equipped, quest } = player;
-  localStorage.setItem(SAVE_KEY, JSON.stringify({ level, xp, gold, maxHp, hp: Math.ceil(hp), kills, inv, equipped, quest, pos: [player.pos.x, 0, player.pos.z] }));
+  const data = { level, xp, gold, maxHp, hp: Math.ceil(hp), kills, inv, equipped, quest, pos: [player.pos.x, 0, player.pos.z] };
+  if (net) net.save(data);
+  else localStorage.setItem(SAVE_KEY, JSON.stringify(data));
 }
 const saved = load();
 
@@ -81,7 +95,7 @@ const player = {
   ...saved,
   pos: new THREE.Vector3(...saved.pos),
   vy: 0, rotY: Math.PI, onGround: true, dead: false,
-  attackCd: 0, attackAnim: 0, lastHurt: -99, t: 0,
+  attackCd: 0, attackAnim: 0, attackSeq: 0, moveAmount: 0, lastHurt: -99, t: 0,
 };
 const hero = createCharacter({ shirt: 0xd9433b, pants: 0x2b3a67, hair: 0x3b2414, weapon: true, bow: true });
 scene.add(hero.root);
@@ -309,6 +323,7 @@ function attack() {
     player.rotY = Math.atan2(tgt.pos.x - player.pos.x, tgt.pos.z - player.pos.z);
   }
   player.attackAnim = 1;
+  player.attackSeq++; // outros jogadores veem o golpe quando esse contador muda
   player.attackCd = ATTACK[w.style].cooldown;
   if (w.style === 'ranged') {
     setTimeout(() => {
@@ -400,11 +415,42 @@ function drinkFromWell() {
   save();
 }
 
+// ---------- Multiplayer ----------
+if (session.online) {
+  ui.setAccount(session.user.username, true);
+  ui.netStatus('🟡 Conectando…');
+  remote = new RemotePlayers(scene);
+  net = new Net(session.token);
+  const onlineText = () => `🟢 Online · ${remote.map.size + 1} jogador${remote.map.size ? 'es' : ''}`;
+  net.on('welcome', (m) => {
+    remote.clear();
+    for (const p of m.players) remote.add(p);
+    ui.netStatus(onlineText());
+    ui.chatMsg(null, `Conectado como ${m.name}. ${m.players.length ? `${m.players.length} outro(s) jogador(es) online.` : 'Você é o único online agora.'}`, 'sys');
+    save(); // garante que o personagem existe no servidor (ex.: conta nova)
+  });
+  net.on('join', (m) => { remote.add(m); ui.netStatus(onlineText()); ui.chatMsg(null, `${m.name} entrou no jogo.`, 'sys'); sfx('ui'); });
+  net.on('leave', (m) => { remote.remove(m.id); ui.netStatus(onlineText()); ui.chatMsg(null, `${m.name} saiu.`, 'sys'); });
+  net.on('snap', (m) => remote.snapshot(m.players, net.id));
+  net.on('chat', (m) => { ui.chatMsg(m.from, m.text, m.id === net.id ? 'me' : ''); if (m.id !== net.id) sfx('ui'); });
+  net.on('kicked', (m) => { ui.netStatus('🔴 Desconectado'); ui.chatMsg(null, m.message, 'sys'); ui.log(m.message, 'bad'); });
+  net.on('error', (m) => { if (m.code === 'auth') logoutSession(null); });
+  net.on('disconnect', (e) => {
+    if (e.code === 4001 || e.code === 4003) return;
+    remote.clear();
+    ui.netStatus('🟠 Reconectando…');
+  });
+  document.getElementById('logout').onclick = () => { save(); setTimeout(() => logoutSession(session.token), 150); };
+  addEventListener('beforeunload', save);
+} else {
+  ui.setAccount('Aventureiro (offline)', false);
+}
+
 // ---------- Câmera ----------
 const cam = { yaw: 0, pitch: 0.38, dist: 13 };
 
 // ---------- Loop ----------
-const clock = new THREE.Clock();
+const clock = new THREE.Timer();
 let saveTimer = 0;
 let currentZone = null;
 let inSafe = null;
@@ -435,6 +481,7 @@ function update(dt) {
     ui.renderHelp();
   }
   if (input.hit('inventory') && !player.dead && !ui.dialogOpen) ui.toggleModal('inventory');
+  if (net && input.tapped('Enter') && !ui.isBlocking()) ui.openChat((text) => net.chat(text));
 
   let moveAmount = 0;
   const canAct = !player.dead && !ui.isBlocking();
@@ -514,6 +561,15 @@ function update(dt) {
   projectiles.update(dt);
   loot.update(dt, player, onPickup);
   world.update(t, dt);
+  player.moveAmount = moveAmount;
+  if (net) {
+    net.sendState({
+      x: +player.pos.x.toFixed(2), y: +player.pos.y.toFixed(2), z: +player.pos.z.toFixed(2), r: +player.rotY.toFixed(3),
+      m: moveAmount, air: !player.onGround, d: player.dead, s: player.attackSeq, w: player.equipped,
+      hp: Math.ceil(player.hp), mhp: player.maxHp, lv: player.level,
+    });
+    remote.update(dt);
+  }
 
   // alvo: anel vermelho = travado, amarelo = mira automática do arco
   if (lockTarget && (!alive(lockTarget) || distXZ(lockTarget.pos, player.pos) > 40)) lockTarget = null;
@@ -570,14 +626,15 @@ function update(dt) {
   ui.quest(qh);
   ui.hud(player, xpToNext(player.level), weapon());
   const questTarget = q.status === 'active' ? def.where : (q.status === 'available' || q.status === 'complete') ? elder.pos : null;
-  ui.minimap(player, enemies.alive(), npcs, questTarget, loot.list);
+  ui.minimap(player, enemies.alive(), npcs, questTarget, loot.list, remote ? remote.list() : []);
   ui.updateFloats(camera, dt);
 
   saveTimer += dt;
   if (saveTimer > 5 && !player.dead) { saveTimer = 0; save(); }
 }
 
-function frame() {
+function frame(now) {
+  clock.update(now);
   const dt = Math.min(0.05, clock.getDelta());
   update(dt);
   renderer.render(scene, camera);
@@ -589,4 +646,4 @@ ui.log('Bem-vindo a BlockQuest! Fale com o Ancião Bento.', 'info');
 frame();
 
 // atalho de debug no console
-window.game = { player, enemies, loot, ui, equip, addItem, projectiles, world, sound, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };
+window.game = { player, enemies, loot, ui, equip, addItem, projectiles, world, sound, session, get net() { return net; }, get remote() { return remote; }, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };

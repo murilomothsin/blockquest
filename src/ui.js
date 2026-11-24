@@ -25,6 +25,8 @@ export class UI {
     this.sound = sound;
     this.floats = [];
     this.dialogOpen = false;
+    this.chatOpen = false;
+    this.online = false;
     this.modal = null; // 'shop' | 'inventory' | 'keys'
     this.shopTab = 'buy';
     this.game = null; // { player, buy, sell, use, equip }
@@ -39,7 +41,56 @@ export class UI {
   }
 
   setGame(g) { this.game = g; }
-  isBlocking() { return this.dialogOpen || this.modal !== null; }
+  isBlocking() { return this.dialogOpen || this.modal !== null || this.chatOpen; }
+
+  // ---------- Conta / online ----------
+  setAccount(name, online) {
+    $('pname').textContent = name;
+    $('account').classList.toggle('hidden', !online);
+    $('chat').classList.toggle('hidden', !online);
+    this.online = online;
+    this.renderHelp();
+  }
+
+  netStatus(text) { $('netstatus').innerHTML = text; }
+
+  // ---------- Chat ----------
+  chatMsg(from, text, cls = '') {
+    const box = $('chatlog');
+    const d = document.createElement('div');
+    d.className = cls;
+    if (from) { const b = document.createElement('b'); b.textContent = `${from}: `; d.append(b); }
+    d.append(document.createTextNode(text)); // textContent: nunca interpreta HTML vindo de outro jogador
+    box.appendChild(d);
+    while (box.children.length > 10) box.firstChild.remove();
+    setTimeout(() => { d.style.opacity = 0; }, 12000);
+  }
+
+  openChat(onSend) {
+    const inp = $('chatinput');
+    this.chatOpen = true;
+    this.input.keys.clear();
+    $('chat').classList.add('open');
+    inp.classList.remove('hidden');
+    inp.value = '';
+    inp.focus();
+    inp.onkeydown = (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') {
+        const text = inp.value.trim();
+        if (text) onSend(text);
+        this.closeChat();
+      } else if (e.key === 'Escape') this.closeChat();
+    };
+  }
+
+  closeChat() {
+    const inp = $('chatinput');
+    this.chatOpen = false;
+    inp.blur();
+    inp.classList.add('hidden');
+    $('chat').classList.remove('open');
+  }
 
   hud(p, xpNext, weapon) {
     $('level').textContent = p.level;
@@ -235,6 +286,7 @@ export class UI {
       ['Câmera', [h('kbd', {}, 'Botão dir. + arrastar')]],
       ['Zoom', [h('kbd', {}, 'Scroll')]],
       ['Travar alvo', [h('kbd', {}, 'Clique no inimigo')]],
+      ...(this.online ? [['Chat', [h('kbd', {}, 'Enter')]]] : []),
       ...ACTIONS.filter((a) => a.id !== 'help').map((a) => [a.label, caps(this.input.bindings[a.id])]),
     ];
     el.append(
@@ -285,7 +337,7 @@ export class UI {
   }
 
   // ---------- Minimapa ----------
-  minimap(player, enemies, npcs, target, loot = []) {
+  minimap(player, enemies, npcs, target, loot = [], others = []) {
     const g = this.mini, W = 170, R = 60, sc = W / 2 / R;
     g.clearRect(0, 0, W, W);
     g.save();
@@ -312,6 +364,11 @@ export class UI {
     for (const n of npcs) {
       const [x, y] = toMap(n.pos.x, n.pos.z);
       g.fillStyle = '#ffd84a'; g.beginPath(); g.arc(x, y, 3.5, 0, Math.PI * 2); g.fill();
+    }
+    for (const o of others) { // outros jogadores
+      const [x, y] = toMap(o.pos.x, o.pos.z);
+      g.fillStyle = '#4fc3ff'; g.strokeStyle = '#fff'; g.lineWidth = 1.5;
+      g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2); g.fill(); g.stroke();
     }
     if (target) {
       let [x, y] = toMap(target.x, target.z);

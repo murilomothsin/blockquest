@@ -27,6 +27,36 @@
   <div id="floats"></div>
   <div id="controls" class="panel"></div>
 
+  <div id="account" class="hidden">
+    <span id="netstatus"></span>
+    <button id="logout" class="mini secondary">Sair</button>
+  </div>
+
+  <div id="chat" class="hidden">
+    <div id="chatlog"></div>
+    <input id="chatinput" class="hidden" maxlength="200" autocomplete="off" placeholder="Digite e aperte Enter · Esc cancela" />
+  </div>
+
+  <div id="login" class="hidden">
+    <div class="lbox">
+      <h1>⚔️ BlockQuest</h1>
+      <p class="lsub">RPG de blocos no navegador</p>
+      <div class="ltabs">
+        <button type="button" id="ltab-login" class="tab active">Entrar</button>
+        <button type="button" id="ltab-register" class="tab">Criar conta</button>
+      </div>
+      <form id="lform">
+        <label>Usuário<input id="luser" autocomplete="username" maxlength="16" required /></label>
+        <label>Senha<input id="lpass" type="password" autocomplete="current-password" maxlength="128" required /></label>
+        <label id="lconfirm-row" class="hidden">Confirmar senha<input id="lconfirm" type="password" autocomplete="new-password" maxlength="128" /></label>
+        <label id="limport-row" class="hidden check"><input id="limport" type="checkbox" checked /> Levar meu progresso offline para esta conta</label>
+        <div id="lerror"></div>
+        <button id="lsubmit" type="submit">Entrar</button>
+      </form>
+      <button id="loffline" type="button" class="secondary">Jogar offline (sem conta)</button>
+    </div>
+  </div>
+
   <div id="dialog" class="hidden">
     <div id="dtitle"></div>
     <div id="dtext"></div>

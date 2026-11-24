@@ -13,7 +13,7 @@ export const ACTIONS = [
   { id: 'mute', label: 'Som liga/desliga', defaults: ['KeyM', null] },
 ];
 
-export const RESERVED = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape', 'Mouse2'];
+export const RESERVED = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape', 'Mouse2', 'Enter', 'NumpadEnter'];
 
 const KEYS_STORAGE = 'blockquest-keys-v1';
 
@@ -57,6 +57,8 @@ export class Input {
 
     addEventListener('keydown', (e) => {
       if (this.capture) { e.preventDefault(); this.finishCapture(e.code); return; }
+      // digitando em um campo de texto (chat, login): não é comando do jogo
+      if (e.target instanceof HTMLInputElement && e.target.type !== 'range' && e.target.type !== 'checkbox') return;
       if (e.code === 'Tab' || e.code === 'Space' || this.isBound(e.code)) e.preventDefault();
       if (!this.keys.has(e.code)) this.pressed.add(e.code);
       this.keys.add(e.code);

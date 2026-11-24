@@ -1,18 +1,47 @@
 # BlockQuest RPG
 
-Jogo de RPG 3D de navegador, com estética blocada estilo Roblox. Feito com Three.js + Vite.
+Jogo de RPG 3D de navegador, multiplayer, com estética blocada estilo Roblox. Three.js + Vite no cliente, Node + WebSocket + SQLite no servidor.
 
 ## Rodar
 
+Requer **Node 22.13+** (usa o `node:sqlite` nativo, sem dependência nativa).
+
 ```bash
 npm install
-npm run dev      # http://localhost:5173
-npm run build    # gera dist/
+npm run dev        # servidor do jogo (3001) + Vite (5173) juntos → http://localhost:5173
 ```
+
+Produção (um único processo serve o jogo, a API e o WebSocket):
+
+```bash
+npm run build
+npm start          # http://localhost:3001  (PORT=8080 npm start para outra porta)
+```
+
+Outros scripts: `npm run dev:client` (só Vite), `npm run dev:server` (só servidor, com reload).
+O banco fica em `server/data/blockquest.db` (fora do git). Use `DB_PATH=/caminho/arquivo.db` para mudar.
+
+## Multiplayer e contas
+
+- Ao abrir o jogo aparece a tela de **Entrar / Criar conta**. Também dá para **jogar offline** (progresso no navegador).
+- Usuário: 3–16 caracteres (letras, números, `_`), sem diferenciar maiúsculas. Senha: mínimo 6. Senhas são guardadas com **scrypt** + salt; o login gera um token de sessão (30 dias) salvo no navegador.
+- Ao criar conta, dá para **levar o progresso offline** para a conta nova.
+- O progresso (nível, ouro, inventário, missões, posição) fica **no servidor**, por conta.
+- Online você vê os outros jogadores (nome em cima da cabeça, movimento, golpes, arma equipada), pontos azuis no minimapa e o **chat (Enter)**.
+- Se a mesma conta entrar em outro lugar, a sessão antiga é desconectada.
+
+### Como funciona
+
+```
+cliente ──HTTP──▶ /api/register | /api/login | /api/me | /api/logout | /api/online
+cliente ◀──WS──▶ /ws   hello(token) → welcome | state (10/s) → snap (10/s) | chat | save | join/leave
+```
+
+**Limitações desta primeira etapa:** monstros, drops e missões ainda rodam em cada cliente. Cada jogador vê os próprios monstros, e o progresso é enviado pelo cliente (o servidor valida tipos e limites, mas não é anti-cheat). Próximo passo: servidor autoritativo para monstros, dano e loot, para lutar junto contra o mesmo inimigo.
 
 ## Controles (padrão)
 
-Todos os controles de ação podem ser remapeados no jogo (painel **Controles → ⚙️ Personalizar**), com até 2 teclas por ação, incluindo botões do mouse. WASD/setas, Esc e o botão direito (câmera) são fixos.
+Todos os controles de ação podem ser remapeados no jogo (painel **Controles → ⚙️ Personalizar**), com até 2 teclas por ação, incluindo botões do mouse. WASD/setas, Enter, Esc e o botão direito (câmera) são fixos.
 
 | Ação | Tecla |
 |---|---|
@@ -22,52 +51,54 @@ Todos os controles de ação podem ser remapeados no jogo (painel **Controles �
 | Atacar | Clique esquerdo ou F |
 | Travar alvo | Clicar no inimigo, ou Tab para alternar |
 | Câmera | Botão direito + arrastar, Q/R, scroll pra zoom |
-| Falar / loja | E |
+| Falar / loja / beber no poço | E |
 | Poção / Poção grande | 1 / 2 |
 | Inventário | I |
+| Chat (online) | Enter |
+| Som liga/desliga | M |
 | Mostrar/ocultar controles | H |
 | Soltar alvo / fechar janela | Esc |
 
-## Mira
+## Mecânicas
 
-Mira assistida + trava de alvo (estilo MMORPG):
-- Com arco, o alvo é escolhido automaticamente: o inimigo mais próximo num cone de ~60° à frente (anel **amarelo**).
-- Clicar num inimigo ou apertar Tab trava o alvo (anel **vermelho**). A flecha faz uma leve curva até o alvo travado.
-- Sem alvo, a flecha sai reta para frente.
+- **Mira:** assistida, com anel amarelo no alvo automático do arco e anel vermelho no alvo travado (clique ou Tab). As flechas fazem uma leve curva até o alvo travado.
+- **Vida:** não regenera sozinha. Recupera só com **poções** ou **bebendo no poço da vila** (E). Inimigos regeneram devagar (2%/s) depois de 12 s sem levar dano.
+- **Zona segura:** círculo de 32 m em volta da vila (marcado no chão). Monstros não entram e nada aparece ali.
+- **Encontros selvagens (estilo Pokémon):** andando no meio das árvores, fora da vila e das estradas, de vez em quando um goblin pula do mato (com "!"). No máximo 2 ao mesmo tempo, com intervalo mínimo de 15 s. Configurável em `WILD` (`src/enemies.js`).
+- **Golem Antigo:** se você fica a mais de 8 m, ele arremessa pedras. Uma área vermelha marca onde a pedra vai cair, e dá pra desviar.
+- **Drops:** a cada 5 inimigos derrotados cai um baú (poção ou arma). O chefe sempre deixa uma arma rara.
+- **Limite do mapa:** círculo de 140 m, cercado por montanhas.
 
-## O que já existe
+## Sons
 
-- Mundo aberto: Vila Pedraverde, Floresta Sombria, Campos do Leste, Acampamento Goblin e Ruínas Antigas
-- Personagens blocados animados (andar, pular, golpe de espada, tiro com arco)
-- Inimigos com IA (vagar → perseguir → atacar → voltar): Slime, Goblin e o chefe Golem Antigo
-- Combate corpo a corpo e à distância, crítico, knockback, números de dano, regeneração e renascimento
-- **Armas:** 4 espadas e 3 arcos. O Arco Curto dá o mesmo dano da Espada de Ferro (+8), com 22 m de alcance e cadência de 0,75 s (espada: 0,5 s)
-- **Loja** com abas Comprar/Vender, itens agrupados por categoria
-- **Inventário** para usar poções e trocar de arma
-- **Drops:** a cada 5 inimigos derrotados cai um baú (poção ou arma); o chefe sempre deixa uma arma rara
-- XP, níveis, ouro, cadeia de 3 missões, minimapa com ★ do objetivo e 🎁 dos baús
-- Save automático no localStorage (`game.reset()` no console zera o progresso)
+Todos os sons são sintetizados com Web Audio (`src/audio.js`), com volume e pan pela posição. Para usar arquivos de verdade, coloque os áudios em `public/sounds/` e mapeie em `public/sounds/sounds.json`, por exemplo `{ "swing": "espada.mp3" }`. A lista de nomes está no próprio json.
 
 ## Estrutura
 
 ```
+server/
+  index.js       HTTP (API + arquivos do build) e WebSocket (presença, snapshots, chat, saves)
+  auth.js        contas (scrypt), sessões, validação dos saves
+  db.js          SQLite (node:sqlite): users, sessions, characters
 src/
-  main.js        loop, jogador, câmera, NPCs, mira, itens
-  world.js       mapa, zonas, cenário e colisão
+  main.js        loop, jogador, câmera, NPCs, mira, itens, integração online
+  net/           session.js (login), net.js (WebSocket), remote.js (outros jogadores)
+  world.js       mapa, zonas, zona segura, mato, colisão, limite
   character.js   modelo blocado (espada/arco) + animação
-  enemies.js     tipos de inimigos, spawns, IA e dano
-  combat.js      flechas (projéteis)
+  enemies.js     tipos, spawns, IA, arremesso do golem, encontros selvagens
+  combat.js      flechas
   loot.js        baús de drop
   items.js       catálogo de itens, loja, tabela de drop
   quests.js      missões
-  ui.js          HUD, loja, inventário, remapeamento, minimapa
+  audio.js       sons sintetizados / arquivos opcionais
+  ui.js          HUD, loja, inventário, remapeamento, chat, minimapa
   input.js       teclado/mouse com bindings configuráveis
 ```
 
 ## Próximos passos
 
+- Servidor autoritativo para monstros, dano e loot (combate cooperativo de verdade)
+- Grupos (party) com XP compartilhado, e troca de itens entre jogadores
 - Classes (guerreiro / mago / arqueiro) e habilidades
-- Armaduras e acessórios
-- Multiplayer (WebSocket) para jogar em grupo
-- Terreno com relevo, dungeons e ciclo dia/noite
-- Personalização do avatar
+- Personalização do avatar (cores e acessórios salvos na conta)
+- Deploy (ex.: Fly.io, Railway ou VPS) com HTTPS/WSS
