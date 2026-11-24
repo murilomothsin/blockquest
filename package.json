@@ -13,7 +13,9 @@
     "denuncias": "node --disable-warning=ExperimentalWarning scripts/denuncias.js",
     "cargo": "node --disable-warning=ExperimentalWarning scripts/cargo.js",
     "test:chat": "node scripts/test-chat.mjs",
-    "test:server": "node --disable-warning=ExperimentalWarning scripts/test-server.mjs"
+    "test:server": "node --disable-warning=ExperimentalWarning scripts/test-server.mjs",
+    "test:mina": "node --disable-warning=ExperimentalWarning scripts/test-mina.mjs",
+    "balance": "node scripts/balance.mjs"
   },
   "engines": {
     "node": ">=22.13"

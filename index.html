@@ -14,13 +14,16 @@
       <div class="row"><b id="pname">Aventureiro</b> <span class="lvl">Nv <span id="level">1</span></span></div>
       <div class="bar hp"><div id="hpfill"></div><span id="hptext"></span></div>
       <div class="bar xp"><div id="xpfill"></div><span id="xptext"></span></div>
-      <div class="row small">🪙 <span id="gold">0</span> &nbsp; 🧪 <span id="potions">0</span> &nbsp; ⚗️ <span id="bigpotions">0</span> &nbsp; <span title="Um item cai a cada 5 abates">🎁 <span id="drop">0/5</span></span></div>
+      <div class="row" id="pclass"></div>
+      <div class="row small"><i class="coin"></i> <span id="gold">0</span> &nbsp; 🧪 <span id="potions">0</span> &nbsp; ⚗️ <span id="bigpotions">0</span> &nbsp; <span title="Um item cai a cada 5 abates">🎁 <span id="drop">0/5</span></span></div>
       <div class="row small" id="weapon"></div>
       <div class="row small" id="defense"></div>
     </div>
     <div class="panel" id="quest"></div>
     <canvas id="minimap" width="170" height="170"></canvas>
+    <div id="region"></div>
   </div>
+  <button id="skillbtn" class="hidden"><span class="sicon"></span><span class="skey"></span><span class="scd"></span></button>
 
   <div id="bossbar" class="hidden"><div id="bossname"></div><div class="bar boss"><div id="bossfill"></div></div></div>
   <div id="prompt" class="hidden"></div>
@@ -73,7 +76,7 @@
 
   <div id="death" class="hidden">
     <h1>Você caiu!</h1>
-    <p>Perdeu 10% do seu ouro.</p>
+    <div id="deathinfo"></div>
     <button id="respawn">Renascer na vila</button>
   </div>
 

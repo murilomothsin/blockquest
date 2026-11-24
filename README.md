@@ -75,7 +75,8 @@ Comandos (digite `/ajuda` no jogo para ver só os do seu cargo):
 | `/expulsar nome [motivo]` | mod, admin | desconecta |
 | `/banir nome horas [motivo]` · `/desbanir nome` | mod, admin | suspende a conta (`0` = permanente); o login mostra o motivo |
 | `/denuncias` · `/resolver id` | mod, admin | denúncias abertas |
-| `/tp x z` · `/tp nome` | QA, admin | teleporta |
+| `/tp x z` · `/tp nome` · `/tp mina\|chefe\|porta\|casa` | QA, admin | teleporta |
+| `/classe nome` | QA, admin | troca de classe na hora (zera a árvore) |
 | `/item id [qtd]` · `/itens` · `/ouro n` · `/xp n` · `/nivel n` | QA, admin | dá itens/ouro/XP, define nível |
 | `/curar` · `/imortal` · `/spawn tipo [qtd]` · `/matar` · `/missao n` | QA, admin | ferramentas de teste |
 | `/cargo nome cargo` | admin | muda cargo |
@@ -115,8 +116,10 @@ Todos os controles de ação podem ser remapeados no jogo (painel **Controles �
 | Atacar | Clique esquerdo ou F |
 | Travar alvo | Clicar no inimigo, ou Tab para alternar |
 | Câmera | Botão direito + arrastar, Q/R, scroll pra zoom |
-| Falar / loja / beber no poço | E |
+| Interagir (falar, loja, poço, portas, móveis da casa, baús) | E |
 | Poção / Poção grande | 1 / 2 |
+| Habilidade da classe | G |
+| Classe / árvore de habilidades | K |
 | Inventário | I |
 | Chat (online) | Enter |
 | Som liga/desliga | M |
@@ -132,7 +135,43 @@ Todos os controles de ação podem ser remapeados no jogo (painel **Controles �
 - **Golem Antigo:** se você fica a mais de 8 m, ele arremessa pedras. Uma área vermelha marca onde a pedra vai cair, e dá pra desviar.
 - **Drops:** a cada 5 inimigos derrotados cai um baú (poção, arma ou armadura). O chefe sempre deixa um equipamento raro.
 - **Armaduras e capacetes:** 5 tiers com as mesmas cores das armas (couro, ferro, aço, rúnico e élfico, este só caindo de monstros). A defesa da armadura e do capacete soma, e cada ponto reduz o dano em %, com retorno decrescente: `def / (def + 25)`. Ferro completo (10) bloqueia 29%; rúnico completo (27), 52%. A primeira missão dá uma Armadura de Couro.
-- **Limite do mapa:** círculo de 140 m, cercado por montanhas.
+- **Limite do mapa:** círculo de 190 m, cercado por montanhas.
+
+### Biomas
+| Bioma | Onde | Monstros | Baú |
+|---|---|---|---|
+| Campos (centro) | vila, floresta, acampamento, ruínas | slime, goblin, Golem Antigo | floresta, campos, ruínas |
+| Deserto Escaldante | leste | esqueletos | 1 |
+| Pântano Sombrio | sudoeste | aranhas, mortos-vivos | 1 |
+| Pedreira | noroeste | goblins das cavernas · **entrada da mina** | 1 |
+
+### Mina Abandonada (dungeon)
+Entre pela porta na Pedreira (E). Lá dentro é escuro (o personagem leva uma lanterna) e as paredes bloqueiam movimento, flechas e visão — também no servidor. São 7 salas: entrada, aranhas, ossos (esqueletos), goblins das cavernas, cripta (mortos-vivos), salão e a sala do chefe **Goblin Minerador** (3.200 de vida, joga dinamite com área marcada no chão). 22 monstros e 6 baús. Saída pela escada da entrada. Feita para o **nível 8** (ver Balanceamento).
+
+### Baús de tesouro
+12 baús fixos (6 na superfície, 6 na mina). Abrir (E) espalha **moedas douradas** e 1–4 itens no chão. Cada jogador tem os seus: depois de aberto, o baú volta em 10 min (comum), 20 min (raro) ou 45 min (lendário, sala do chefe, sempre com 1 equipamento de chefe).
+
+### Classes e árvore de habilidades
+No **nível 2** o jogador escolhe a classe (permanente; ganha a arma da classe de presente). Inspiradas nas classes que existem tanto em **Tormenta20** quanto em **D&D 5e** e que combinam com um RPG de ação com espada/arco/magia:
+
+| Classe | T20 · D&D | Bônus fixo | Habilidade (G) |
+|---|---|---|---|
+| 🛡️ Guerreiro | Guerreiro · Fighter | +20% vida, +3 defesa, +10% dano corpo a corpo | Golpe Giratório (em volta, 160%) |
+| 🏹 Caçador | Caçador · Ranger | +15% dano à distância, +4 m de alcance | Chuva de Flechas (área no alvo, 130%) |
+| 🔮 Arcanista | Arcanista · Wizard | −10% vida, +20% magia, explosões maiores | Bola de Fogo (área no alvo, 200%) |
+| 🗡️ Ladino | Ladino · Rogue | +15% esquiva, +10% crítico, golpes e passos mais rápidos | Golpe Furtivo (crítico garantido, 300%) |
+
+Ficaram de fora (por enquanto): Clérigo/Paladino (precisam de cura em grupo — conflita com "vida só com poção/poço"), Bardo e Druida (precisam de buffs/transformações).
+Cada classe tem uma árvore de 5 nós: 3 de atributos (até 3 pontos), a habilidade ativa e um nó final que depende dela. **1 ponto por nível** (árvore completa no nível 13). O Ancião Bento redistribui os pontos por 25 × nível de ouro. Cajados (magia em área) e adagas (golpes rápidos) entraram na loja para o Arcanista e o Ladino.
+
+### Casa do jogador
+A casa com a porta dourada, ao lado do poço, é a sua (E para entrar). Por dentro é **privada**: cada jogador vê só a própria (os outros não te veem lá). Móveis: **Armário de Armas** (armas, armaduras, elmos), **Baú** (poções), **Cofre** (ouro) e **Espelho** (personalização, em breve).
+
+### Morte
+Ao morrer você **perde tudo o que carrega** (volta com uma Espada de Madeira) e uma parte do **ouro na mão**: 10% na 1ª morte, 20% na 2ª, 30% na 3ª... O contador zera **a cada 2 dias, à meia-noite UTC**. O que está guardado em casa nunca se perde — a ideia é que a casa vire o "banco" e o armário guarde um equipamento reserva.
+
+### Balanceamento
+`node scripts/balance.mjs` simula, com as mesmas regras do jogo, dano por segundo de cada classe por nível, tempo para matar cada monstro, vida perdida em cada sala da mina, economia e custo da morte. Progressão típica: missão dos goblins no Nv3, Golem no Nv5, biomas no Nv6–7, mina no **Nv8**, saída da mina no Nv9.
 
 ## Sons
 
@@ -153,30 +192,33 @@ scripts/
   dev.js         sobe servidor + Vite
   cargo.js       define/lista cargos (npm run cargo)
   denuncias.js   lista/resolve denúncias (npm run denuncias)
-  test-*.mjs     testes do servidor (npm run test:server / test:chat)
+  test-*.mjs     testes do servidor: test-server (economia/cargos), test-chat, test-mina (classes, casa, mina, baús, morte)
+  balance.mjs    análise de balanceamento (números)
 src/
   shared/        código usado pelo navegador E pelo servidor:
-    progress.js    regras do personagem: XP, ouro, loja, equipar, poções, missões, baús, dano, morte
-    mobs.js        tipos, spawns, IA, arremesso do golem, encontros selvagens (MobSim)
-    worldData.js   layout do mapa com semente, NPCs, colisão, zona segura, mato
+    progress.js    regras do personagem: XP, ouro, loja, equipar, poções, missões, baús, casa, portas, classe, morte
+    classes.js     classes, árvores de habilidades, habilidades ativas, atributos (statsOf)
+    combatRules.js ataque normal, explosão do cajado e habilidades (validados no servidor)
+    mobs.js        tipos, spawns, IA, arremessos (pedra/dinamite), encontros selvagens (MobSim)
+    worldData.js   layout do mapa com semente, biomas, mina (grade), casa, baús de tesouro, NPCs, colisão
     items.js       catálogo de itens, loja, tabela de drop
     quests.js      missões
     roles.js       cargos, permissões e comandos da equipe
   main.js        loop, jogador, câmera, NPCs, mira, itens, integração online
   net/           session.js (login), net.js (WebSocket), remote.js (outros jogadores)
   world.js       desenha o mapa a partir de shared/worldData.js
-  character.js   modelo blocado (espada/arco) + animação
+  character.js   modelo blocado (espada/adaga/arco/cajado) + animação
   enemies.js     visual dos monstros (MobSim local offline, ou estado do servidor online)
-  combat.js      flechas
-  loot.js        baús de drop
+  combat.js      flechas e orbes mágicos
+  loot.js        baús de drop e pilhas de moedas
   audio.js       sons sintetizados / arquivos opcionais
-  ui.js          HUD, loja, inventário, remapeamento, chat, minimapa
+  ui.js          HUD, loja, inventário, classe/árvore, casa, morte, chat, minimapa (biomas/mina)
   input.js       teclado/mouse com bindings configuráveis
 ```
 
 ## Próximos passos
 
 - Grupos (party) com XP compartilhado, e troca de itens entre jogadores
-- Classes (guerreiro / mago / arqueiro) e habilidades
-- Personalização do avatar (cores e acessórios salvos na conta)
+- Personalização do avatar no Espelho da casa (cores e acessórios salvos na conta)
+- Mais casas: hoje todo jogador usa a mesma porta (o interior é privado); depois, uma casa por jogador/compra de casas
 - Deploy (ex.: Fly.io, Railway ou VPS) com HTTPS/WSS

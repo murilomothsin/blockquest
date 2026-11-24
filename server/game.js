@@ -2,19 +2,15 @@
 // O servidor é a fonte da verdade do progresso: o cliente só manda posição e PEDIDOS
 // ("acertei o monstro 12", "comprar espada", "pegar baú 3") e recebe o resultado.
 import { MobSim, TYPES } from '../src/shared/mobs.js';
-import { buildLayout, createWorldQueries, WORLD_RADIUS, SPAWN_POINT } from '../src/shared/worldData.js';
-import { ITEMS, ATTACK } from '../src/shared/items.js';
-import {
-  LootBag, act, kill, hurt, rollDamage, weaponOf, publicCharacter,
-} from '../src/shared/progress.js';
+import { buildLayout, createWorldQueries, WORLD_RADIUS, SPAWN_POINT, regionAt } from '../src/shared/worldData.js';
+import { ITEMS } from '../src/shared/items.js';
+import { LootBag, act, kill, hurt, publicCharacter } from '../src/shared/progress.js';
+import { playerAttack, playerSkill } from '../src/shared/combatRules.js';
 import { saveCharacter } from './auth.js';
 
 const TICK_MS = 50; // simulação a 20 Hz
 const SNAP_EVERY = 2; // estado dos monstros a 10 Hz
 const VIEW = 110; // só manda o que está a até 110 m do jogador
-const MELEE_SLACK = 2; // tolerância de distância (latência) para golpe corpo a corpo
-const RANGED_SLACK = 8; // idem para flechas
-const CD_SLACK = 0.75; // aceita golpes até 25% mais rápido que o cooldown (jitter de rede)
 const MAX_SPEED = 21; // m/s aceitos (correr = 13 m/s, + folga para lag)
 const SPEED_SLACK = 3; // m extras por mensagem
 const SAVE_EVERY_MS = 10_000;
@@ -34,7 +30,7 @@ export function createGame({ players, send }) {
     p.dirty = true;
     send(p.ws, { t: 'fx', c: { ...publicCharacter(p.c), dead: !!p.c.dead }, fx });
   }
-  const ctxOf = (p) => ({ pos: p.lastPos, now: nowS(), rand: Math.random, loot: p.loot, god: p.god });
+  const ctxOf = (p) => ({ pos: p.lastPos, now: nowS(), clock: Date.now(), rand: Math.random, loot: p.loot, god: p.god });
 
   function route(ev) {
     if (ev.e === 'hurtPlayer') { // dano no jogador: o servidor aplica (armadura, morte, perda de ouro)
@@ -91,7 +87,8 @@ export function createGame({ players, send }) {
     const [x, , z] = p.c.pos;
     p.lastPos = { x, z };
     p.lastPosT = Date.now();
-    return p.loot.list().map((l) => ({ k: 'loot', lid: l.lid, item: l.item, x: l.x, z: l.z }));
+    p.region = regionAt(x, z);
+    return p.loot.list().map((l) => ({ k: 'loot', lid: l.lid, item: l.item, n: l.n, x: l.x, z: l.z }));
   }
 
   function leave(p) { saveCharacter(p.id, p.c); }
@@ -100,14 +97,16 @@ export function createGame({ players, send }) {
   function handleState(p, s) {
     const now = Date.now();
     const r = Math.hypot(s.x, s.z);
-    if (r > WORLD_RADIUS + 1) { s.x *= WORLD_RADIUS / r; s.z *= WORLD_RADIUS / r; }
+    if (regionAt(s.x, s.z) === 'world' && r > WORLD_RADIUS + 1) { s.x *= WORLD_RADIUS / r; s.z *= WORLD_RADIUS / r; }
     if (p.c.dead) { // morto não anda: devolve para onde morreu
       if (Math.hypot(s.x - p.lastPos.x, s.z - p.lastPos.z) > 0.5) send(p.ws, { t: 'setpos', x: p.lastPos.x, z: p.lastPos.z });
       s.x = p.lastPos.x; s.z = p.lastPos.z;
     }
     const d = Math.hypot(s.x - p.lastPos.x, s.z - p.lastPos.z);
     const budget = ((now - p.lastPosT) / 1000) * MAX_SPEED + SPEED_SLACK;
-    if (d > budget) {
+    // na mina as paredes valem no servidor também (nada de atravessar até o chefe/baús)
+    const wall = regionAt(s.x, s.z) === 'mine' && (world.isBlocked(s.x, s.z) || !world.los(p.lastPos.x, p.lastPos.z, s.x, s.z));
+    if (d > budget || wall) {
       p.speedFlags = (p.speedFlags || 0) + 1;
       send(p.ws, { t: 'setpos', x: p.lastPos.x, z: p.lastPos.z });
       return false;
@@ -115,6 +114,7 @@ export function createGame({ players, send }) {
     p.lastPos = { x: s.x, z: s.z };
     p.lastPosT = now;
     p.c.pos = [s.x, 0, s.z];
+    p.region = regionAt(s.x, s.z);
     // o que os outros veem vem do servidor, não do que o cliente disse
     s.w = p.c.equipped; s.a = p.c.armor || ''; s.hm = p.c.helmet || '';
     s.lv = p.c.level; s.hp = Math.ceil(p.c.hp); s.mhp = p.c.maxHp; s.d = !!p.c.dead;
@@ -127,6 +127,7 @@ export function createGame({ players, send }) {
     p.lastPos = { x, z };
     p.lastPosT = Date.now();
     p.c.pos = [x, 0, z];
+    p.region = regionAt(x, z);
     if (p.state) { p.state.x = x; p.state.z = z; }
     send(p.ws, { t: 'setpos', x, z });
   }
@@ -136,30 +137,22 @@ export function createGame({ players, send }) {
     const fx = [];
     const changed = act(p.c, a, ctxOf(p), fx);
     if (a.a === 'respawn' && changed) teleport(p, SPAWN_POINT[0], SPAWN_POINT[2]);
+    const tp = fx.find((f) => f.k === 'teleport'); // portas da mina e da casa
+    if (tp) teleport(p, tp.x, tp.z);
     if (changed || fx.length) pushFx(p, fx);
   }
 
-  /** Cliente diz que acertou monstros. Servidor confere arma, distância e cooldown, e rola o dano. */
-  function handleHit(p, msg) {
-    if (!p.state || p.c.dead) return;
-    const w = weaponOf(p.c);
-    const style = msg.kind === 'arrow' ? 'ranged' : 'melee';
-    if (w.style !== style) return;
-    const now = Date.now();
-    if (now - (p.lastAttack || 0) < ATTACK[style].cooldown * 1000 * CD_SLACK) return;
-    p.lastAttack = now;
+  /** Habilidade ativa (tecla G): o servidor confere classe, arma, recarga e alvo, e escolhe quem é atingido */
+  function handleSkill(p, msg) {
+    if (!p.state) return;
+    const r = playerSkill(sim, p.c, p.id, { skill: String(msg.skill || ''), target: msg.target }, p.lastPos, (p.atk ||= {}), nowS());
+    send(p.ws, { t: 'skill', ok: r.ok, cd: r.cd, reason: r.reason, hits: r.hits });
+  }
 
-    const ids = Array.isArray(msg.ids) ? [...new Set(msg.ids.filter(Number.isInteger))].slice(0, 8) : [];
-    const maxD = style === 'melee' ? ATTACK.melee.range + MELEE_SLACK : (w.range || 22) + RANGED_SLACK;
-    const { x, z } = p.lastPos;
-    for (const id of ids) {
-      const m = sim.byId.get(id);
-      if (!m || m.state === 'dead') continue;
-      const d = Math.hypot(m.x - x, m.z - z);
-      if (d > maxD + m.def.radius) continue;
-      const { dmg, crit } = rollDamage(p.c); // nível e arma do SERVIDOR
-      sim.damage(m, dmg, crit, (m.x - x) / (d || 1), (m.z - z) / (d || 1), style === 'melee' ? 0.8 : 0.4, p.id);
-    }
+  /** Cliente diz que acertou monstros. As regras compartilhadas conferem arma, distância, parede e recarga, e rolam o dano. */
+  function handleHit(p, msg) {
+    if (!p.state) return;
+    playerAttack(sim, p.c, p.id, msg, p.lastPos, (p.atk ||= {}), nowS());
   }
 
   // ---------- ferramentas de teste (QA) ----------
@@ -180,7 +173,7 @@ export function createGame({ players, send }) {
   }
 
   return {
-    sim, TYPES, ITEMS, join, leave, handleState, handleAct, handleHit, teleport, pushFx, spawnNear, killNear, saveAll,
+    sim, TYPES, ITEMS, join, leave, handleState, handleAct, handleHit, handleSkill, teleport, pushFx, spawnNear, killNear, saveAll,
     stop: () => { clearInterval(timer); saveAll(true); },
   };
 }

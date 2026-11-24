@@ -4,9 +4,71 @@ import * as THREE from 'three';
 import { createCharacter, animateCharacter, flash } from './character.js';
 import { makeLabel } from './world.js';
 import { MobSim, TYPES, TYPE_IDS, STATES, WILD, inArc } from './shared/mobs.js';
+import { playerAttack, playerSkill } from './shared/combatRules.js';
+import { SKILLS } from './shared/classes.js';
 
 export { TYPES, WILD };
 export const LOCAL_ID = 'local';
+
+const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+function part(geo, mat, x = 0, y = 0, z = 0) {
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  return m;
+}
+
+/** Aranha do tamanho de um slime: corpo em duas partes, 8 patas finas e olhos vermelhos */
+function buildSpider() {
+  const root = new THREE.Group();
+  const body = new THREE.Group(); root.add(body);
+  const dark = lambert(0x2b2523), mid = lambert(0x4a3b33);
+  const abdomen = part(new THREE.BoxGeometry(1.1, 0.75, 1.1), dark, 0, 0.6, -0.45);
+  const head = part(new THREE.BoxGeometry(0.7, 0.5, 0.6), mid, 0, 0.5, 0.35);
+  const mark = part(new THREE.BoxGeometry(0.35, 0.05, 0.45), lambert(0xb3261e), 0, 0.99, -0.45);
+  body.add(abdomen, head, mark);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+  for (const [x, y] of [[-0.18, 0.62], [0.18, 0.62], [-0.08, 0.7], [0.08, 0.7]]) body.add(part(new THREE.BoxGeometry(0.1, 0.1, 0.05), eyeMat, x, y, 0.66));
+  const legs = [];
+  for (let i = 0; i < 8; i++) {
+    const side = i < 4 ? -1 : 1, k = i % 4;
+    const pivot = new THREE.Group();
+    pivot.position.set(side * 0.3, 0.5, 0.25 - k * 0.25);
+    const upper = part(new THREE.BoxGeometry(0.8, 0.09, 0.09), mid, side * 0.4, 0.15, 0);
+    upper.rotation.z = side * 0.5;
+    const lower = part(new THREE.BoxGeometry(0.09, 0.65, 0.09), dark, side * 0.8, -0.15, 0);
+    pivot.add(upper, lower);
+    pivot.rotation.y = side * (k - 1.5) * 0.35;
+    body.add(pivot);
+    legs.push(pivot);
+  }
+  const materials = []; root.traverse((o) => { if (o.isMesh && o.material.emissive) materials.push(o.material); });
+  return { root, body, materials: [...new Set(materials)], spider: true, legs };
+}
+
+/** Morto-vivo: braços esticados para frente (pose de zumbi) */
+function zombieArms(c) { c.zombie = true; return c; }
+
+/** Capacete de mineiro com lanterna (goblins das cavernas e o chefe) */
+function minerHelmet(c, s, color = 0xe5b322, lamp = true) {
+  const cap = part(new THREE.BoxGeometry(1.4 * s, 0.45 * s, 1.4 * s), lambert(color), 0, 0.5 * s, 0);
+  c.head.add(cap);
+  if (lamp) {
+    const l = part(new THREE.BoxGeometry(0.35 * s, 0.3 * s, 0.15 * s), new THREE.MeshBasicMaterial({ color: 0xfff2a8 }), 0, 0.5 * s, 0.72 * s);
+    c.head.add(l);
+  }
+  c.materials.push(cap.material);
+}
+
+/** Picareta na mão (troca a lâmina da espada por uma cabeça de picareta) */
+function pickaxe(c, s) {
+  if (!c.sword) return;
+  const blade = c.sword.userData.blade;
+  blade.scale.set(1, 1, 0.9);
+  const head = part(new THREE.BoxGeometry(2.0 * s, 0.35 * s, 0.35 * s), lambert(0x8b8f96), 0, 0, 2.5 * s);
+  c.sword.add(head);
+  c.materials.push(head.material);
+}
 
 function buildModel(type) {
   if (type === 'slime') {
@@ -21,13 +83,38 @@ function buildModel(type) {
     }
     return { root, body, materials: [m.material], slime: true };
   }
-  if (type === 'goblin') {
-    const c = createCharacter({ skin: 0x6bbf3a, shirt: 0x6b4a2b, pants: 0x3b2a1a, hair: null, eyes: 0xffdd00, scale: 0.85, weapon: true, swordColor: 0x777777 });
+  if (type === 'spider') return buildSpider();
+  if (type === 'goblin' || type === 'cave_goblin' || type === 'goblin_boss') {
+    const cave = type !== 'goblin', boss = type === 'goblin_boss';
+    const scale = boss ? 1.95 : 0.85;
+    const skin = cave ? 0x8d958b : 0x6bbf3a; // goblins das cavernas: cinzentos
+    const c = createCharacter({
+      skin, shirt: cave ? 0x4b4f55 : 0x6b4a2b, pants: cave ? 0x2e3136 : 0x3b2a1a, hair: null,
+      eyes: cave ? 0xff9b2a : 0xffdd00, scale, weapon: true, swordColor: cave ? 0x6b4423 : 0x777777,
+    });
+    const s = 0.5 * scale;
     for (const x of [-1, 1]) {
-      const ear = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.18, 0.12), new THREE.MeshLambertMaterial({ color: 0x6bbf3a }));
-      ear.position.set(x * 0.38, 0.05, 0); c.head.add(ear); c.materials.push(ear.material);
+      const ear = new THREE.Mesh(new THREE.BoxGeometry(0.7 * s, 0.36 * s, 0.24 * s), new THREE.MeshLambertMaterial({ color: skin }));
+      ear.position.set(x * 0.76 * s, 0.1 * s, 0); c.head.add(ear); c.materials.push(ear.material);
+    }
+    if (cave) { minerHelmet(c, s, boss ? 0xe5b322 : 0x9a8a5a, boss); pickaxe(c, s); }
+    if (boss) { // barba suja e alças de couro
+      const beard = part(new THREE.BoxGeometry(0.9 * s, 0.5 * s, 0.2 * s), lambert(0x5a5048), 0, -0.55 * s, 0.6 * s);
+      c.head.add(beard); c.materials.push(beard.material);
     }
     return c;
+  }
+  if (type === 'skeleton') {
+    const c = createCharacter({ skin: 0xe8e3d0, shirt: 0xd9d2bc, pants: 0xcfc8b0, hair: null, eyes: 0x1a0505, scale: 0.95, weapon: true, swordColor: 0x8a6a45 });
+    // costelas: faixas escuras no peito
+    for (let i = 0; i < 3; i++) {
+      const rib = part(new THREE.BoxGeometry(0.9, 0.08, 0.05), new THREE.MeshBasicMaterial({ color: 0x3b3428 }), 0, 1.75 - i * 0.22, 0.25);
+      c.body.add(rib);
+    }
+    return c;
+  }
+  if (type === 'zombie') {
+    return zombieArms(createCharacter({ skin: 0x7fa07a, shirt: 0x4b4566, pants: 0x34343f, hair: 0x2b2b1f, eyes: 0xd61f1f, scale: 1.0 }));
   }
   const c = createCharacter({ skin: 0x8a8a8a, shirt: 0x6e6e6e, pants: 0x5a5a5a, hair: null, eyes: 0xff7b00, scale: 2.4 });
   for (const m of c.materials) m.color.offsetHSL(0, 0, (Math.random() - 0.5) * 0.05);
@@ -48,6 +135,16 @@ function makeHpBar(width) {
 
 const rockGeo = new THREE.DodecahedronGeometry(0.8, 0);
 const rockMat = new THREE.MeshLambertMaterial({ color: 0x7d7468 });
+/** banana de dinamite (projétil do Goblin Minerador) */
+function dynamiteMesh() {
+  const g = new THREE.Group();
+  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 1.1, 8), new THREE.MeshLambertMaterial({ color: 0xc8281e }));
+  stick.rotation.z = Math.PI / 2;
+  const spark = new THREE.Mesh(new THREE.SphereGeometry(0.18, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffd23a }));
+  spark.position.x = 0.65;
+  g.add(stick, spark);
+  return g;
+}
 const lerpAngle = (a, b, k) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k;
 
 export class EnemyManager {
@@ -68,6 +165,7 @@ export class EnemyManager {
     this.fx = [];
     this.handlers = { onPlayerHit() {}, onDamage() {}, onKill() {}, onWild() {} };
     if (!online) this.sim = new MobSim(world, { emit: (ev) => this.onEvent(ev) });
+    this.local = { char: null, st: {} }; // offline: personagem e recargas do jogador local
   }
 
   alive() { return this.list.filter((e) => e.state !== 'dead'); }
@@ -131,21 +229,33 @@ export class EnemyManager {
   }
 
   // ---------- Golpes do jogador ----------
-  /** Golpe corpo a corpo. Offline resolve aqui; online manda os alvos para o servidor validar. */
-  melee(px, pz, fx, fz, range, roll) {
-    if (!this.online) { this.sim.hitArc(px, pz, fx, fz, range, roll, this.myId); return; }
-    const ids = this.alive().filter((v) => inArc(v.pos.x, v.pos.z, v.def.radius, px, pz, fx, fz, range)).map((v) => v.id);
-    if (ids.length) this.send?.({ t: 'hit', kind: 'melee', ids });
-  }
-
-  /** Flecha acertou um monstro (detecção no cliente). */
-  arrowHit(v, dirX, dirZ, roll) {
+  /** pedido de ataque: offline as regras compartilhadas resolvem aqui; online vai para o servidor */
+  hit(kind, ids) {
+    if (!ids.length) return;
     if (!this.online) {
-      const { dmg, crit } = roll();
-      this.sim.damage(this.sim.byId.get(v.id), dmg, crit, dirX, dirZ, 0.4, this.myId);
+      const c = this.local.char;
+      playerAttack(this.sim, c, this.myId, { kind, ids }, c.pos, this.local.st, performance.now() / 1000);
       return;
     }
-    this.send?.({ t: 'hit', kind: 'arrow', ids: [v.id] });
+    this.send?.({ t: 'hit', kind, ids });
+  }
+
+  /** Golpe corpo a corpo: manda os monstros no arco da frente */
+  melee(px, pz, fx, fz, range) {
+    this.hit('melee', this.alive().filter((v) => inArc(v.pos.x, v.pos.z, v.def.radius, px, pz, fx, fz, range)).map((v) => v.id));
+  }
+
+  /** Flecha / magia acertou um monstro (detecção no cliente) */
+  projectileHit(v, kind) { this.hit(kind === 'magic' ? 'magic' : 'arrow', [v.id]); }
+
+  /** Habilidade ativa. Retorna (offline) o resultado; online a resposta chega por {t:'skill'} */
+  skill(skill, target) {
+    if (!this.online) {
+      const c = this.local.char;
+      return playerSkill(this.sim, c, this.myId, { skill, target: target?.id }, c.pos, this.local.st, performance.now() / 1000);
+    }
+    this.send?.({ t: 'skill', skill, target: target?.id });
+    return null;
   }
 
   // ---------- Eventos (da MobSim local ou do servidor) ----------
@@ -160,7 +270,16 @@ export class EnemyManager {
       case 'slam': this.sfx('golemSlam', at); break;
       case 'windup': if (v) { v.windup = TYPES[v.type].throw.windup; this.sfx('golemWindup', at); } break;
       case 'rock': this.spawnRock(ev); break;
-      case 'impact': this.sfx('rockImpact', at); this.dust(at, ev.r); break;
+      case 'impact': this.sfx(ev.kind === 'dynamite' ? 'golemSlam' : 'rockImpact', at); this.dust(at, ev.r, ev.kind === 'dynamite' ? 0xff8a2a : 0xb8a990); break;
+      case 'splash': this.dust(at, ev.r, 0x9fd8ff); break;
+      case 'skill': {
+        const S = SKILLS[ev.skill];
+        const color = { giro: 0xffe08a, chuva: 0x9fe870, bola: 0xff7a2a, furtivo: 0xb46bff }[ev.skill] || 0xffffff;
+        this.dust(at, Math.max(1.5, ev.r), color, 0.6);
+        this.sfx(ev.skill === 'bola' ? 'golemSlam' : ev.skill === 'giro' ? 'swing' : 'crit', at);
+        if (S && ev.by === this.myId) this.handlers.onSkill?.(ev);
+        break;
+      }
       case 'hurt':
         if (v) {
           v.flashT = 0.15; flash(v.model, 0x880000);
@@ -193,7 +312,7 @@ export class EnemyManager {
 
   // ---------- Pedra do Golem (visual) ----------
   spawnRock(ev) {
-    const mesh = new THREE.Mesh(rockGeo, rockMat);
+    const mesh = ev.kind === 'dynamite' ? dynamiteMesh() : new THREE.Mesh(rockGeo, rockMat);
     mesh.castShadow = true;
     const from = new THREE.Vector3(ev.fx, ev.fy, ev.fz);
     const to = new THREE.Vector3(ev.tx, 0, ev.tz);
@@ -214,13 +333,14 @@ export class EnemyManager {
     this.sfx('golemThrow', from);
   }
 
-  dust(at, r) {
+  /** anel que se expande no chão (poeira, explosão, habilidade) */
+  dust(at, r, color = 0xb8a990, dur = 0.5) {
     const mesh = new THREE.Mesh(new THREE.RingGeometry(0.6, 1, 32),
-      new THREE.MeshBasicMaterial({ color: 0xb8a990, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide }));
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide }));
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(at.x, 0.1, at.z);
+    mesh.position.set(at.x, 0.12, at.z);
     this.scene.add(mesh);
-    this.fx.push({ mesh, r, t: 0 });
+    this.fx.push({ mesh, r, t: 0, dur });
   }
 
   // ---------- Loop ----------
@@ -276,8 +396,16 @@ export class EnemyManager {
         const hop = Math.abs(Math.sin(v.t * (v.moving ? 8 : 3)));
         model.body.position.y = v.moving ? hop * 0.6 : 0;
         model.body.scale.set(1 + (1 - hop) * 0.15, 1 - (1 - hop) * 0.15 + v.attackAnim * 0.3, 1 + (1 - hop) * 0.15);
+      } else if (model.spider) { // patas mexendo e bote para frente no ataque
+        const sp = v.moving ? 22 : 4;
+        model.legs.forEach((l, i) => { l.rotation.x = Math.sin(v.t * sp + i * 1.3) * (v.moving ? 0.45 : 0.1); });
+        model.body.position.y = Math.abs(Math.sin(v.t * sp * 0.5)) * 0.06;
+        model.body.position.z = v.attackAnim * 0.5;
       } else {
         animateCharacter(model, v.t, v.moving, v.attackAnim);
+        if (model.zombie && v.attackAnim <= 0) { // braços esticados para frente
+          model.armL.rotation.x = model.armR.rotation.x = -1.45 + Math.sin(v.t * 3) * 0.08;
+        }
         if (def.boss && v.attackAnim > 0) model.armL.rotation.x = model.armR.rotation.x; // golpe com os dois braços
         if (v.windup > 0 && def.throw) { // ergue a pedra com os dois braços
           const k = 1 - v.windup / def.throw.windup;
@@ -307,7 +435,7 @@ export class EnemyManager {
     for (let i = this.fx.length - 1; i >= 0; i--) {
       const f = this.fx[i];
       f.t += dt;
-      const k = f.t / 0.5;
+      const k = f.t / (f.dur || 0.5);
       f.mesh.scale.setScalar(f.r * (0.4 + k));
       f.mesh.material.opacity = 0.7 * (1 - k);
       if (k >= 1) { this.scene.remove(f.mesh); this.fx.splice(i, 1); }

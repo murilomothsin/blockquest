@@ -1,6 +1,6 @@
 // Simulação dos monstros em dados puros (sem three.js / DOM).
 // Roda no navegador no modo offline e no servidor no modo online — a mesma IA nos dois.
-import { SAFE_ZONE } from './worldData.js';
+import { SAFE_ZONE, MINE_SPAWNS, ZONES } from './worldData.js';
 
 /**
  * Encontros selvagens estilo Pokémon GBA: andando no meio das árvores, a cada
@@ -23,17 +23,35 @@ export const TYPES = {
   golem: {
     name: 'Golem Antigo', hp: 700, dmg: 26, speed: 2.9, xp: 450, gold: [150, 220], aggro: 18, range: 3.8, cd: 2.0, respawn: 60, radius: 1.8, height: 6.3, boss: true, leash: 60,
     // arremesso de pedra contra quem fica longe: área marcada no chão, dá pra desviar
-    throw: { min: 8, max: 36, cd: 4.5, dmg: 24, radius: 2.8, windup: 0.8, flight: 1.25 },
+    throw: { min: 8, max: 36, cd: 4.5, dmg: 24, radius: 2.8, windup: 0.8, flight: 1.25, kind: 'rock' },
+  },
+  // --- mina e biomas externos ---
+  spider: { name: 'Aranha', hp: 80, dmg: 9, speed: 4.6, xp: 24, gold: [2, 6], aggro: 10, range: 1.6, cd: 0.9, respawn: 25, radius: 0.7, height: 0.9, leash: 40, los: true },
+  skeleton: { name: 'Esqueleto', hp: 190, dmg: 15, speed: 3.4, xp: 55, gold: [5, 12], aggro: 12, range: 2.1, cd: 1.2, respawn: 30, radius: 0.6, height: 2.4, leash: 45, los: true },
+  zombie: { name: 'Morto-vivo', hp: 300, dmg: 19, speed: 2.1, xp: 65, gold: [4, 11], aggro: 10, range: 1.9, cd: 1.6, respawn: 30, radius: 0.65, height: 2.4, leash: 40, los: true },
+  cave_goblin: { name: 'Goblin das Cavernas', hp: 220, dmg: 16, speed: 4.0, xp: 60, gold: [8, 16], aggro: 13, range: 2.0, cd: 1.1, respawn: 30, radius: 0.6, height: 2.3, leash: 45, los: true },
+  goblin_boss: {
+    name: 'Goblin Minerador', hp: 3200, dmg: 36, speed: 3.0, xp: 1200, gold: [300, 450], aggro: 16, range: 3.6, cd: 1.9, respawn: 120, radius: 1.5, height: 5.2, boss: true, leash: 40, los: true,
+    // joga dinamite: área marcada no chão, maior que a pedra do golem
+    throw: { min: 6, max: 30, cd: 5, dmg: 30, radius: 3.5, windup: 0.9, flight: 1.1, kind: 'dynamite' },
   },
 };
 export const TYPE_IDS = Object.keys(TYPES);
 export const STATES = ['idle', 'chase', 'return', 'dead'];
 
+const Z = (id) => ZONES.find((z) => z.id === id);
 export const SPAWNS = [
   { type: 'slime', x: -35, z: -35, r: 15, n: 8 },
   { type: 'slime', x: 38, z: 40, r: 12, n: 6 },
   { type: 'goblin', x: 65, z: -15, r: 7, n: 6 },
   { type: 'golem', x: 0, z: -97, r: 2, n: 1 },
+  // biomas externos
+  { type: 'skeleton', x: Z('desert').x, z: Z('desert').z, r: 18, n: 5 },
+  { type: 'spider', x: Z('swamp').x, z: Z('swamp').z, r: 18, n: 5 },
+  { type: 'zombie', x: Z('swamp').x + 8, z: Z('swamp').z - 6, r: 14, n: 3 },
+  { type: 'cave_goblin', x: Z('quarry').x, z: Z('quarry').z, r: 12, n: 3 },
+  // mina: um monstro por marcador do mapa
+  ...MINE_SPAWNS.map((m) => ({ type: m.type, x: m.x, z: m.z, r: 0.5, n: 1 })),
 ];
 
 const REGEN_DELAY = 12; // s sem levar dano antes de regenerar
@@ -169,7 +187,7 @@ export class MobSim {
         if (d < nearestD) { nearestD = d; nearest = p; }
       }
 
-      if (m.state === 'idle' && nearest && nearestD < def.aggro && valid(nearest)) {
+      if (m.state === 'idle' && nearest && nearestD < def.aggro && valid(nearest) && this.world.los(m.x, m.z, nearest.x, nearest.z)) {
         m.state = 'chase'; m.targetId = nearest.id;
         this.emit({ e: 'aggro', id: m.id, x: m.x, z: m.z });
       }
@@ -278,7 +296,7 @@ export class MobSim {
       dur: T.flight, r: T.radius, dmg: T.dmg, t: 0,
     };
     this.rocks.push(r);
-    this.emit({ e: 'rock', id: r.id, mob: m.id, fx: r.fx, fy: r.fy, fz: r.fz, tx: r.tx, tz: r.tz, dur: r.dur, r: r.r, x: m.x, z: m.z });
+    this.emit({ e: 'rock', id: r.id, mob: m.id, kind: T.kind || 'rock', fx: r.fx, fy: r.fy, fz: r.fz, tx: r.tx, tz: r.tz, dur: r.dur, r: r.r, x: m.x, z: m.z });
   }
 
   updateRocks(dt, players) {

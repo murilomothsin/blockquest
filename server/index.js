@@ -125,7 +125,7 @@ const findOnline = (name) => [...players.values()].find((p) => p.name.toLowerCas
 const f = (v, lim = 1e4) => (Number.isFinite(v) ? Math.max(-lim, Math.min(lim, v)) : 0);
 /** só posição e animação vêm do cliente; arma/vida/nível o servidor preenche (game.handleState) */
 const cleanState = (m) => ({
-  x: f(m.x, 300), y: f(m.y, 100), z: f(m.z, 300), r: f(m.r, 100), m: f(m.m, 1), air: !!m.air, s: Math.trunc(f(m.s, 1e9)),
+  x: f(m.x, 700), y: f(m.y, 100), z: f(m.z, 700), // mina e casa ficam em x 400–520 (fora do mapa visível) r: f(m.r, 100), m: f(m.m, 1), air: !!m.air, s: Math.trunc(f(m.s, 1e9)),
 });
 
 wss.on('connection', (ws) => {
@@ -155,7 +155,7 @@ wss.on('connection', (ws) => {
       send(ws, {
         t: 'welcome', id: me.id, name: me.name, role: me.role,
         c: { ...publicCharacter(me.c), dead: !!me.c.dead }, loot,
-        players: [...players.values()].filter((p) => p.id !== me.id).map((p) => ({ id: p.id, name: p.name, role: p.role, ...p.state })),
+        players: [...players.values()].filter((p) => p.id !== me.id).map((p) => ({ id: p.id, name: p.name, role: p.role, ...(p.region === 'home' ? {} : p.state) })),
       });
       broadcast({ t: 'join', id: me.id, name: me.name, role: me.role }, me.id);
       console.log(`[+] ${me.name}${me.role !== 'player' ? ` (${me.role})` : ''} entrou (${players.size} online)`);
@@ -166,6 +166,7 @@ wss.on('connection', (ws) => {
       case 'state': game.handleState(me, cleanState(msg)); break;
       case 'hit': game.handleHit(me, msg); break;
       case 'act': game.handleAct(me, msg); break;
+      case 'skill': game.handleSkill(me, msg); break;
       case 'chat': {
         const raw = String(msg.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
         const now = Date.now();
@@ -216,12 +217,14 @@ wss.on('connection', (ws) => {
   });
 });
 
-// snapshot com a posição de todo mundo
+// snapshot com a posição de todo mundo. Quem está dentro de casa some para os outros (e não vê ninguém):
+// a casa é um interior privado, todo mundo usa o mesmo lugar do mapa mas cada um só vê a si mesmo.
 setInterval(() => {
   if (players.size < 2) return;
   const list = [];
-  for (const p of players.values()) if (p.state) list.push({ id: p.id, ...p.state });
-  broadcast({ t: 'snap', players: list });
+  for (const p of players.values()) if (p.state && p.region !== 'home') list.push({ id: p.id, ...p.state });
+  const data = JSON.stringify({ t: 'snap', players: list });
+  for (const p of players.values()) if (p.region !== 'home' && p.ws.readyState === 1) p.ws.send(data);
 }, TICK_MS);
 
 // derruba conexões mortas e limpa sessões vencidas

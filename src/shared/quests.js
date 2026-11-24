@@ -24,4 +24,12 @@ export const QUESTS = [
     doneText: 'Inacreditável... você derrotou o Golem! A Vila Pedraverde te deve tudo, herói.',
     reward: { xp: 600, gold: 300, items: { big_potion: 3, potion: 3 } },
   },
+  {
+    id: 'mina', title: 'A Mina Abandonada', target: 'goblin_boss', count: 1,
+    where: { x: -146, z: -96, label: 'Mina Abandonada (Pedreira)' },
+    intro: 'Os mineiros sumiram na mina da Pedreira, a noroeste. Dizem que um Goblin Minerador enorme tomou conta dos túneis, com aranhas, esqueletos e mortos-vivos. Entre, sobreviva ao escuro e derrote-o. Guarde seus itens em casa antes: quem cai lá dentro perde tudo o que carrega!',
+    progressText: (n, c) => `Goblin Minerador derrotado: ${n}/${c}`,
+    doneText: 'Você voltou da mina! Os mineiros vão poder trabalhar de novo. Tome, isto vai ajudar nas próximas aventuras.',
+    reward: { xp: 900, gold: 400, items: { big_potion: 4 } },
+  },
 ];

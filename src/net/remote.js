@@ -1,6 +1,6 @@
 // Outros jogadores no mundo: avatar, nome em cima da cabeça e movimento interpolado
 import * as THREE from 'three';
-import { createCharacter, animateCharacter, setGear } from '../character.js';
+import { createCharacter, animateCharacter, setGear, setWeapon } from '../character.js';
 import { makeLabel } from '../world.js';
 import { ITEMS } from '../items.js';
 import { roleOf, tagged } from '../shared/roles.js';
@@ -71,18 +71,16 @@ export class RemotePlayers {
     p.seq = s.s;
     if (s.w !== p.w) {
       p.w = s.w;
-      const it = ITEMS[s.w] || ITEMS.wood_sword;
-      p.char.sword.visible = it.style === 'melee';
-      p.char.bow.visible = it.style === 'ranged';
-      (it.style === 'melee' ? p.char.sword.userData.blade : p.char.bow.userData.limb).material.color.setHex(it.color);
+      setWeapon(p.char, ITEMS[s.w] || ITEMS.wood_sword);
     }
     const gearKey = `${s.a || ''}|${s.hm || ''}`;
     if (gearKey !== p.gearKey) {
       p.gearKey = gearKey;
       setGear(p.char, { armorColor: ITEMS[s.a]?.color ?? null, helmetColor: ITEMS[s.hm]?.color ?? null });
     }
-    if (!p.has) { p.pos.copy(p.target); p.rot = p.targetRot; }
+    if (!p.has || p.pos.distanceTo(p.target) > 30) { p.pos.copy(p.target); p.rot = p.targetRot; } // entrou/saiu da mina: pula
     p.has = true;
+    p.seen = performance.now();
   }
 
   snapshot(list, myId) {
@@ -95,8 +93,9 @@ export class RemotePlayers {
 
   update(dt) {
     for (const p of this.map.values()) {
-      p.char.root.visible = p.label.visible = p.has;
-      if (!p.has) continue;
+      // sem notícias há 1,5 s (ex.: entrou em casa, que é privada): some
+      p.char.root.visible = p.label.visible = p.has && performance.now() - p.seen < 1500;
+      if (!p.char.root.visible) continue;
       p.t += dt;
       p.pos.lerp(p.target, Math.min(1, dt * 12));
       let d = p.targetRot - p.rot;
@@ -113,5 +112,5 @@ export class RemotePlayers {
     }
   }
 
-  list() { return [...this.map.values()].filter((p) => p.has); }
+  list() { return [...this.map.values()].filter((p) => p.has && performance.now() - p.seen < 1500); }
 }

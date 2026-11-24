@@ -4,8 +4,9 @@ import { ROLES, ROLE_IDS, can, outranks, roleOf, tagged } from '../src/shared/ro
 import { ITEMS } from '../src/shared/items.js';
 import { TYPES } from '../src/shared/mobs.js';
 import { QUESTS } from '../src/shared/quests.js';
-import { gainXp, setLevel } from '../src/shared/progress.js';
-import { WORLD_RADIUS } from '../src/shared/worldData.js';
+import { gainXp, setLevel, maxHpOf } from '../src/shared/progress.js';
+import { CLASSES, CLASS_LEVEL } from '../src/shared/classes.js';
+import { WORLD_RADIUS, MINE_ENTRY, MINE_ROOM_CENTERS, MINE_DOOR, HOME_ENTRY } from '../src/shared/worldData.js';
 import { mute, unmute, staffLog, fmtDur } from './moderation.js';
 
 export const CLOSE = { kicked: 4005, banned: 4004 };
@@ -17,7 +18,7 @@ const NEEDS = {
   '/mutar': 'moderate', '/desmutar': 'moderate', '/expulsar': 'moderate', '/banir': 'moderate', '/desbanir': 'moderate',
   '/denuncias': 'reports', '/resolver': 'reports',
   '/tp': 'test', '/item': 'test', '/itens': 'test', '/ouro': 'test', '/xp': 'test', '/nivel': 'test', '/curar': 'test',
-  '/imortal': 'test', '/spawn': 'test', '/matar': 'test', '/missao': 'test',
+  '/imortal': 'test', '/spawn': 'test', '/matar': 'test', '/missao': 'test', '/classe': 'test',
   '/cargo': 'roles',
 };
 
@@ -141,8 +142,11 @@ export function runCommand(me, cmd, args, ctx) {
     // ---------- testes (QA) ----------
     case '/tp': {
       let x, z, label;
-      const t = args.length === 1 ? online(args[0]) : null;
-      if (t) { ({ x, z } = t.lastPos); x += 2; label = t.name; } else {
+      // atalhos: /tp mina | chefe | porta | casa
+      const places = { mina: MINE_ENTRY, chefe: MINE_ROOM_CENTERS.find((r) => r.id === 'chefe'), porta: { x: MINE_DOOR.x * 0.97, z: MINE_DOOR.z * 0.97 }, casa: HOME_ENTRY };
+      const place = args.length === 1 && places[args[0]?.toLowerCase()];
+      const t = args.length === 1 && !place ? online(args[0]) : null;
+      if (place) { ({ x, z } = place); label = args[0]; } else if (t) { ({ x, z } = t.lastPos); x += 2; label = t.name; } else {
         x = n(args[0], NaN); z = n(args[1], NaN);
         if (!Number.isFinite(x) || !Number.isFinite(z)) return reply('Use: /tp x z  ou  /tp nome'), true;
         const r = Math.hypot(x, z);
@@ -209,6 +213,16 @@ export function runCommand(me, cmd, args, ctx) {
       const k = game.killNear(me);
       reply(`${k} monstro(s) derrotado(s).`);
       staffLog(me, 'matar', null, k);
+      return true;
+    }
+    case '/classe': {
+      const cls = args[0]?.toLowerCase();
+      if (!CLASSES[cls]) return reply(`Classes: ${Object.keys(CLASSES).join(', ')}`), true;
+      if (me.c.level < CLASS_LEVEL) setLevel(me.c, CLASS_LEVEL);
+      me.c.cls = cls; me.c.skills = {};
+      me.c.maxHp = maxHpOf(me.c); me.c.hp = Math.min(me.c.hp, me.c.maxHp);
+      changed([{ k: 'classChosen', cls }, { k: 'log', text: `🧪 [teste] classe: ${CLASSES[cls].name}`, cls: 'info' }]);
+      staffLog(me, 'classe', null, cls);
       return true;
     }
     case '/missao': {

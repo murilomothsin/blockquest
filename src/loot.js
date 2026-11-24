@@ -9,8 +9,10 @@ import { makeLabel } from './world.js';
 export class Loot {
   constructor(scene) { this.scene = scene; this.list = []; }
 
-  drop(id, at, lid) {
+  /** id = item ou 'gold' (n moedas) */
+  drop(id, at, lid, n = 1) {
     if (lid != null && this.list.some((l) => l.lid === lid)) return; // já está no chão (reconexão)
+    if (id === 'gold') return this.dropGold(at, lid, n);
     const it = ITEMS[id];
     if (!it) return;
     const rare = it.kind !== 'consumable';
@@ -36,6 +38,31 @@ export class Loot {
     g.position.set(at.x, 0, at.z);
     this.scene.add(g);
     this.list.push({ id, lid, g, chest, t: 0, askedT: -99 });
+  }
+
+  /** pilha de moedas douradas girando */
+  dropGold(at, lid, n) {
+    const g = new THREE.Group();
+    const chest = new THREE.Group();
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffc928, emissive: 0x5a3a00 });
+    const geo = new THREE.CylinderGeometry(0.28, 0.28, 0.08, 14);
+    const count = Math.min(7, 2 + Math.floor(n / 15));
+    for (let i = 0; i < count; i++) {
+      const c = new THREE.Mesh(geo, mat);
+      c.position.set((i % 3 - 1) * 0.22, 0.05 + i * 0.07, (Math.floor(i / 3) - 0.5) * 0.2);
+      c.castShadow = true;
+      chest.add(c);
+    }
+    const big = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.1, 18), mat);
+    big.rotation.x = Math.PI / 2; big.position.y = 0.95;
+    chest.add(big);
+    g.add(chest);
+    const label = makeLabel(`+${n} ouro`, '#ffd65c', 0.6);
+    label.position.y = 1.7;
+    g.add(label);
+    g.position.set(at.x, 0, at.z);
+    this.scene.add(g);
+    this.list.push({ id: 'gold', lid, g, chest, t: 0, askedT: -99, coin: big });
   }
 
   remove(lid) {

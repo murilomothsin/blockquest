@@ -5,6 +5,8 @@ export const ACTIONS = [
   { id: 'talk', label: 'Falar / Interagir', defaults: ['KeyE', null] },
   { id: 'potion', label: 'Poção de Vida', defaults: ['Digit1', null] },
   { id: 'bigPotion', label: 'Poção Grande', defaults: ['Digit2', null] },
+  { id: 'skill', label: 'Habilidade da classe', defaults: ['KeyG', null] },
+  { id: 'tree', label: 'Classe / Habilidades', defaults: ['KeyK', null] },
   { id: 'target', label: 'Trocar alvo', defaults: ['Tab', null] },
   { id: 'inventory', label: 'Inventário', defaults: ['KeyI', null] },
   { id: 'camLeft', label: 'Girar câmera ←', defaults: ['KeyQ', null] },

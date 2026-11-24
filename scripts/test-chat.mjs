@@ -60,4 +60,7 @@ ok(/si mesmo/.test(B.last('sys')?.text || ''), 'não dá pra se denunciar');
 
 A.ws.close(); B.ws.close();
 await sleep(200);
+// limpa as contas de teste (as denúncias somem junto: ON DELETE CASCADE)
+const { db } = await import('../server/db.js');
+db.prepare("DELETE FROM users WHERE username IN ('chatteste_a', 'chatteste_b')").run();
 process.exit();

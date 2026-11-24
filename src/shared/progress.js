@@ -1,57 +1,69 @@
 // Regras de progresso do personagem em dados puros (sem three.js / DOM):
-// XP e nível, ouro, inventário, loja, equipamento, poções, missões, baús, dano e morte.
+// XP e nível, classe e árvore, ouro, inventário, loja, equipamento, poções, missões, baús (drop e tesouro),
+// casa (armário, cofre, baú), portas (mina/casa), dano e morte.
 // Offline roda no navegador; online roda SÓ no servidor (o cliente manda pedidos e recebe o resultado).
 //
 // Cada função recebe o personagem `c` e uma lista `fx` onde empurra efeitos para a interface:
-//   {k:'log', text, cls} {k:'sfx', name, at?} {k:'float', text, color, size, at?} {k:'levelUp', level}
-//   {k:'loot', lid, item, x, z} {k:'lootGone', lid} {k:'hurt', dmg} {k:'death', by, lost}
-//   {k:'respawn', pos} {k:'heal', n, color} {k:'pickup', item} {k:'equip', item} {k:'closeDialog'}
-import { ITEMS, SLOTS, rollDrop, damageReduction } from './items.js';
+//   {k:'log', text, cls} {k:'sfx', name, at?} {k:'float', text, color, size, at?, h?} {k:'levelUp', level}
+//   {k:'loot', lid, item, n?, x, z} {k:'lootGone', lid} {k:'hurt', dmg} {k:'death', by, lost, pct, items, resetAt}
+//   {k:'respawn', pos} {k:'heal', n, color} {k:'pickup', item, n?} {k:'equip', item} {k:'closeDialog'}
+//   {k:'teleport', x, z, region} {k:'chest', id} {k:'classChosen', cls} {k:'skillUp', node}
+import { ITEMS, SLOTS, rollDrop, rollTreasure, damageReduction } from './items.js';
 import { QUESTS } from './quests.js';
 import { TYPES } from './mobs.js';
-import { NPCS, WELL, INTERACT_RANGE, SPAWN_POINT } from './worldData.js';
+import {
+  NPCS, WELL, INTERACT_RANGE, SPAWN_POINT, TREASURES, TREASURE_RESPAWN, HOME_DOOR, HOME_ENTRY, HOME_EXIT,
+  HOME_FURNITURE, MINE_DOOR, MINE_ENTRY, MINE_EXIT, inHome,
+} from './worldData.js';
+import {
+  CLASSES, CLASS_LEVEL, TREES, RESPEC_COST, statsOf, canRaise, nodeOf, skillPointsFree,
+} from './classes.js';
 
 export const HP_BASE = 100;
 export const HP_PER_LEVEL = 15;
 export const DROP_EVERY = 5; // a cada 5 abates cai um baú
-export const DEATH_GOLD_LOSS = 0.1;
+export const DEATH_STEP = 0.1; // cada morte no período tira +10% do ouro (10%, 20%, 30%...)
+export const DEATH_PERIOD_MS = 2 * 86400_000; // zera a cada 2 dias, à meia-noite UTC
 export const LOOT_TTL = 300; // s até o baú sumir
 export const LOOT_REACH = 3.5; // distância máxima para pegar (servidor; o cliente encosta a 1.8 m)
 export const MAX_LEVEL = 99;
 
 export const xpToNext = (l) => Math.floor(50 * Math.pow(l, 1.5));
 export const maxHpFor = (level) => HP_BASE + (level - 1) * HP_PER_LEVEL;
+export const maxHpOf = (c) => Math.round(maxHpFor(c.level) * statsOf(c).hpMul);
 export const weaponOf = (c) => ITEMS[c.equipped] || ITEMS.wood_sword;
-export const defenseOf = (c) => (ITEMS[c.armor]?.def || 0) + (ITEMS[c.helmet]?.def || 0);
+export const defenseOf = (c) => (ITEMS[c.armor]?.def || 0) + (ITEMS[c.helmet]?.def || 0) + statsOf(c).def;
 export const isEquipped = (c, id) => id === c.equipped || id === c.armor || id === c.helmet;
-
-export function rollDamage(c, rand = Math.random) {
-  const base = 10 + c.level * 3 + weaponOf(c).bonus;
-  const crit = rand() < 0.15;
-  return { dmg: Math.round(base * (0.85 + rand() * 0.3) * (crit ? 2 : 1)), crit };
-}
+export const deathPeriod = (ms) => Math.floor(ms / DEATH_PERIOD_MS);
+/** % de ouro que a PRÓXIMA morte vai tirar */
+export const nextDeathPct = (c, ms = Date.now()) => Math.min(100, Math.round(((c.deaths?.period === deathPeriod(ms) ? c.deaths.n : 0) + 1) * DEATH_STEP * 100));
+export const treasureLeft = (c, t, ms = Date.now()) => Math.max(0, (c.chests?.[t.id] || 0) + TREASURE_RESPAWN[t.tier] * 1000 - ms);
 
 export function newCharacter() {
   return {
     level: 1, xp: 0, gold: 10, maxHp: HP_BASE, hp: HP_BASE, kills: 0,
     inv: { potion: 3, wood_sword: 1 }, equipped: 'wood_sword', armor: null, helmet: null,
     quest: { idx: 0, status: 'available', progress: 0 }, pos: [...SPAWN_POINT],
+    cls: null, skills: {}, chests: {}, home: { rack: {}, chest: {}, safe: 0 }, deaths: { period: 0, n: 0 },
   };
 }
 
 const int = (v, min, max, def) => (Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : def);
 const num = (v, min, max, def) => (Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : def);
+const cleanBag = (o, ok = () => true) => {
+  const out = {};
+  if (o && typeof o === 'object') for (const [k, v] of Object.entries(o).slice(0, 80)) if (ITEMS[k] && ok(ITEMS[k])) { const n = int(v, 0, 9999, 0); if (n > 0) out[k] = n; }
+  return out;
+};
+const gearOk = (it) => it.kind !== 'consumable';
+const potionOk = (it) => it.kind === 'consumable';
 
-/** Aceita só campos conhecidos e itens que existem; vida máxima sempre vem do nível. */
+/** Aceita só campos conhecidos e itens que existem; vida máxima sempre vem do nível + classe. */
 export function normalizeCharacter(d) {
   const base = newCharacter();
   if (!d || typeof d !== 'object') return base;
-  const inv = {};
-  if (d.inv && typeof d.inv === 'object') {
-    for (const [k, v] of Object.entries(d.inv).slice(0, 80)) if (ITEMS[k]) { const n = int(v, 0, 9999, 0); if (n > 0) inv[k] = n; }
-  }
+  const inv = cleanBag(d.inv);
   const level = int(d.level, 1, MAX_LEVEL, 1);
-  const maxHp = maxHpFor(level);
   const q = d.quest && typeof d.quest === 'object' ? d.quest : base.quest;
   const quest = {
     idx: int(q.idx, 0, QUESTS.length, 0),
@@ -59,29 +71,58 @@ export function normalizeCharacter(d) {
     progress: int(q.progress, 0, 1000, 0),
   };
   if (quest.idx >= QUESTS.length) quest.status = 'done';
+  const cls = CLASSES[d.cls] && level >= CLASS_LEVEL ? d.cls : null;
+  const skills = {};
+  if (cls && d.skills && typeof d.skills === 'object') {
+    for (const n of TREES[cls]) { const v = int(d.skills[n.id], 0, n.max, 0); if (v) skills[n.id] = v; }
+  }
+  const chests = {};
+  const now = Date.now();
+  if (d.chests && typeof d.chests === 'object') {
+    for (const t of TREASURES) { const v = d.chests[t.id]; if (Number.isFinite(v) && now - v < TREASURE_RESPAWN[t.tier] * 1000) chests[t.id] = v; }
+  }
+  const h = d.home && typeof d.home === 'object' ? d.home : {};
   const c = {
-    level, xp: int(d.xp, 0, 1e9, 0), gold: int(d.gold, 0, 1e9, 0), maxHp,
-    hp: int(d.hp, 0, maxHp, maxHp), kills: int(d.kills, 0, 1e9, 0), inv,
+    level, xp: int(d.xp, 0, 1e9, 0), gold: int(d.gold, 0, 1e9, 0), maxHp: 0, hp: 0,
+    kills: int(d.kills, 0, 1e9, 0), inv,
     equipped: ITEMS[d.equipped]?.kind === 'weapon' && inv[d.equipped] ? d.equipped : 'wood_sword',
     armor: ITEMS[d.armor]?.kind === 'armor' && inv[d.armor] ? d.armor : null,
     helmet: ITEMS[d.helmet]?.kind === 'helmet' && inv[d.helmet] ? d.helmet : null,
     quest,
-    pos: Array.isArray(d.pos) ? [num(d.pos[0], -200, 200, 0), 0, num(d.pos[2], -200, 200, 8)] : [...SPAWN_POINT],
+    pos: Array.isArray(d.pos) ? [num(d.pos[0], -700, 700, 0), 0, num(d.pos[2], -700, 700, 8)] : [...SPAWN_POINT],
+    cls, skills, chests,
+    home: { rack: cleanBag(h.rack, gearOk), chest: cleanBag(h.chest, potionOk), safe: int(h.safe, 0, 1e9, 0) },
+    deaths: { period: int(d.deaths?.period, 0, 1e7, 0), n: int(d.deaths?.n, 0, 1000, 0) },
   };
+  // pontos gastos a mais que o nível permite (ex.: nível alterado por teste): zera a árvore
+  if (skillPointsFree(c) < 0) c.skills = {};
+  c.maxHp = maxHpOf(c);
+  c.hp = int(d.hp, 0, c.maxHp, c.maxHp);
   if (c.equipped === 'wood_sword' && !inv.wood_sword) inv.wood_sword = 1; // nunca fica sem arma
-  if (c.hp <= 0) c.hp = maxHp; // salvo morto: volta vivo
+  if (c.hp <= 0) c.hp = c.maxHp; // salvo morto: volta vivo
   return c;
 }
 
 /** Só o que vai para o cliente / banco (sem campos de runtime) */
 export function publicCharacter(c) {
-  const { level, xp, gold, maxHp, hp, kills, inv, equipped, armor, helmet, quest, pos } = c;
-  return { level, xp, gold, maxHp, hp: Math.ceil(hp), kills, inv: { ...inv }, equipped, armor, helmet, quest: { ...quest }, pos: [...pos] };
+  const { level, xp, gold, maxHp, hp, kills, inv, equipped, armor, helmet, quest, pos, cls, skills, chests, home, deaths } = c;
+  return {
+    level, xp, gold, maxHp, hp: Math.ceil(hp), kills, inv: { ...inv }, equipped, armor, helmet, quest: { ...quest }, pos: [...pos],
+    cls: cls || null, skills: { ...skills }, chests: { ...chests },
+    home: { rack: { ...home.rack }, chest: { ...home.chest }, safe: home.safe }, deaths: { ...deaths },
+  };
 }
 
-const addItem = (c, id, n = 1) => { c.inv[id] = (c.inv[id] || 0) + n; };
-const removeItem = (c, id, n = 1) => { c.inv[id] = (c.inv[id] || 0) - n; if (c.inv[id] <= 0) delete c.inv[id]; };
+const addItem = (bag, id, n = 1) => { bag[id] = (bag[id] || 0) + n; };
+const removeItem = (bag, id, n = 1) => { bag[id] = (bag[id] || 0) - n; if (bag[id] <= 0) delete bag[id]; };
 const near = (pos, x, z, r) => pos && Math.hypot(pos.x - x, pos.z - z) <= r;
+
+/** vida máxima mudou (nível, classe, árvore): ganha a diferença, nunca cura além disso */
+function recalcHp(c) {
+  const old = c.maxHp;
+  c.maxHp = maxHpOf(c);
+  c.hp = Math.max(1, Math.min(c.maxHp, c.hp + Math.max(0, c.maxHp - old)));
+}
 
 // ---------- XP / nível ----------
 export function gainXp(c, n, fx) {
@@ -90,10 +131,11 @@ export function gainXp(c, n, fx) {
   while (c.xp >= xpToNext(c.level) && c.level < MAX_LEVEL) {
     c.xp -= xpToNext(c.level);
     c.level++;
-    c.maxHp = maxHpFor(c.level);
-    c.hp += HP_PER_LEVEL; // não cura: só ganha a vida máxima nova
+    recalcHp(c);
     fx.push({ k: 'levelUp', level: c.level });
     fx.push({ k: 'log', text: `Você subiu para o nível ${c.level}! Vida máxima: ${c.maxHp}`, cls: 'good' });
+    if (c.level === CLASS_LEVEL && !c.cls) fx.push({ k: 'log', text: '⭐ Você já pode escolher sua classe! Aperte K.', cls: 'good' }, { k: 'chooseClass' });
+    else if (c.cls) fx.push({ k: 'log', text: '⭐ +1 ponto de habilidade (K para abrir a árvore).', cls: 'good' });
   }
 }
 
@@ -101,18 +143,21 @@ export function gainXp(c, n, fx) {
 export function setLevel(c, level) {
   c.level = Math.max(1, Math.min(MAX_LEVEL, Math.trunc(level)));
   c.xp = 0;
-  c.maxHp = maxHpFor(c.level);
+  if (c.level < CLASS_LEVEL) { c.cls = null; c.skills = {}; }
+  if (skillPointsFree(c) < 0) c.skills = {};
+  c.maxHp = maxHpOf(c);
   c.hp = Math.min(c.hp, c.maxHp);
 }
 
-// ---------- Baús (loot) ----------
-/** Baús do jogador. Ficam só na memória (somem ao sair ou depois de LOOT_TTL). */
+// ---------- Baús (loot no chão) ----------
+/** Itens e moedas no chão, de cada jogador. Ficam só na memória (somem ao sair ou depois de LOOT_TTL). */
 export class LootBag {
   constructor() { this.next = 1; this.items = new Map(); }
-  add(item, x, z, now, fx) {
+  /** item = id do item ou 'gold' (n = quantidade de moedas) */
+  add(item, x, z, now, fx, n = 1) {
     const lid = this.next++;
-    this.items.set(lid, { lid, item, x, z, t: now });
-    fx.push({ k: 'loot', lid, item, x, z });
+    this.items.set(lid, { lid, item, n, x, z, t: now });
+    fx.push({ k: 'loot', lid, item, n, x, z });
     return lid;
   }
   expire(now, fx) {
@@ -132,11 +177,11 @@ export function kill(c, type, at, ctx, fx) {
   c.kills++;
   fx.push({ k: 'sfx', name: 'coin', at });
   fx.push({ k: 'float', text: `+${g} 🪙`, color: '#ffd65c', size: 16, at, h: def.height + 1 });
-  fx.push({ k: 'log', text: `${def.name} derrotado! +${g} ouro`, cls: 'gold' });
+  fx.push({ k: 'log', text: `${def.name} derrotado! +${g} 🪙`, cls: 'gold' });
   if (c.kills % DROP_EVERY === 0) {
     ctx.loot.add(rollDrop(false, rand), at.x, at.z, ctx.now, fx);
     fx.push({ k: 'sfx', name: 'drop', at });
-    fx.push({ k: 'log', text: '🎁 Um item caiu! Encoste no baú para pegar.', cls: 'good' });
+    fx.push({ k: 'log', text: '🎁 Um item caiu! Encoste nele para pegar.', cls: 'good' });
   }
   if (def.boss) {
     ctx.loot.add(rollDrop(true, rand), at.x + 1.5, at.z, ctx.now, fx);
@@ -155,24 +200,42 @@ export function kill(c, type, at, ctx, fx) {
 }
 
 // ---------- Dano / morte ----------
-/** Dano bruto do monstro → dano real (armadura). Retorna o dano aplicado. */
+/**
+ * Dano bruto do monstro → dano real (armadura). Retorna o dano aplicado.
+ * Morte: perde TODOS os itens que carrega (o que está guardado em casa fica a salvo) e uma % do ouro
+ * que cresce 10% a cada morte (10%, 20%, 30%...), zerando a cada 2 dias à meia-noite UTC.
+ * Volta com uma Espada de Madeira para não ficar desarmado.
+ */
 export function hurt(c, dmg, type, ctx, fx) {
   if (c.dead || ctx.god) return 0;
   const rand = ctx.rand || Math.random;
+  if (rand() < statsOf(c).dodge) { // esquiva (Ladino)
+    fx.push({ k: 'float', text: 'Esquivou!', color: '#ffe08a', size: 18 }, { k: 'sfx', name: 'jump' });
+    return 0;
+  }
   const real = Math.max(1, Math.round(dmg * (0.85 + rand() * 0.3) * (1 - damageReduction(defenseOf(c)))));
   c.hp = Math.max(0, c.hp - real);
   fx.push({ k: 'hurt', dmg: real });
   if (c.hp <= 0) {
     c.dead = true;
-    const lost = Math.floor(c.gold * DEATH_GOLD_LOSS);
+    const ms = ctx.clock ?? Date.now();
+    const period = deathPeriod(ms);
+    if (c.deaths.period !== period) c.deaths = { period, n: 0 };
+    c.deaths.n++;
+    const pct = Math.min(100, Math.round(c.deaths.n * DEATH_STEP * 100));
+    const lost = Math.floor((c.gold * pct) / 100);
     c.gold -= lost;
-    fx.push({ k: 'death', by: TYPES[type]?.name || 'um monstro', lost });
+    const items = Object.values(c.inv).reduce((s, n) => s + n, 0) - (c.inv.wood_sword && c.equipped === 'wood_sword' ? 1 : 0);
+    c.inv = { wood_sword: 1 };
+    c.equipped = 'wood_sword'; c.armor = null; c.helmet = null;
+    fx.push({ k: 'death', by: TYPES[type]?.name || 'um monstro', lost, pct, items: Math.max(0, items), resetAt: (period + 1) * DEATH_PERIOD_MS });
   }
   return real;
 }
 
 // ---------- Ações do jogador ----------
 const deny = (fx, text) => { fx.push({ k: 'sfx', name: 'deny' }); if (text) fx.push({ k: 'log', text, cls: 'bad' }); return false; };
+const fmtMin = (ms) => (ms >= 60_000 ? `${Math.ceil(ms / 60_000)} min` : `${Math.ceil(ms / 1000)} s`);
 
 function equip(c, id, fx) {
   const it = ITEMS[id];
@@ -183,21 +246,31 @@ function equip(c, id, fx) {
   return true;
 }
 
+/** Item/moedas espalhados em volta de um ponto (baú de tesouro) */
+function scatter(ctx, fx, x, z, list) {
+  list.forEach(([item, n], i) => {
+    const a = (i / list.length) * Math.PI * 2 + 0.3;
+    ctx.loot.add(item, x + Math.cos(a) * 1.3, z + Math.sin(a) * 1.3, ctx.now, fx, n);
+  });
+}
+
 /**
- * Executa um pedido do jogador. ctx = { pos:{x,z}, now (s), rand, loot: LootBag }.
+ * Executa um pedido do jogador. ctx = { pos:{x,z}, now (s), clock (ms), rand, loot: LootBag }.
  * Retorna true se mudou algo.
  */
 export function act(c, a, ctx, fx) {
   if (!a || typeof a.a !== 'string') return false;
   if (c.dead && a.a !== 'respawn') return false;
   const it = ITEMS[a.id];
+  const clock = ctx.clock ?? Date.now();
+  const qty = (have) => (a.n === -1 ? have : Math.max(1, Math.min(have, Math.trunc(Number(a.n) || 1))));
   switch (a.a) {
     case 'buy': {
       if (!it || !it.price) return deny(fx);
       if (!near(ctx.pos, NPCS.merchant.x, NPCS.merchant.z, INTERACT_RANGE.npc)) return deny(fx, 'Vá até a Mercadora Lia para comprar.');
       if (c.gold < it.price) return deny(fx);
       c.gold -= it.price;
-      addItem(c, a.id);
+      addItem(c.inv, a.id);
       fx.push({ k: 'sfx', name: 'coin' }, { k: 'log', text: `Comprou ${it.icon} ${it.name}.`, cls: 'gold' });
       if (SLOTS[it.kind]) equip(c, a.id, fx);
       return true;
@@ -206,9 +279,9 @@ export function act(c, a, ctx, fx) {
       if (!it || !c.inv[a.id]) return deny(fx);
       if (!near(ctx.pos, NPCS.merchant.x, NPCS.merchant.z, INTERACT_RANGE.npc)) return deny(fx, 'Vá até a Mercadora Lia para vender.');
       if (isEquipped(c, a.id) && c.inv[a.id] <= 1) return deny(fx, 'Não dá para vender o item que você está usando.');
-      removeItem(c, a.id);
+      removeItem(c.inv, a.id);
       c.gold += it.sell;
-      fx.push({ k: 'sfx', name: 'coin' }, { k: 'log', text: `Vendeu ${it.icon} ${it.name} por ${it.sell} ouro.`, cls: 'gold' });
+      fx.push({ k: 'sfx', name: 'coin' }, { k: 'log', text: `Vendeu ${it.icon} ${it.name} por ${it.sell} 🪙.`, cls: 'gold' });
       return true;
     }
     case 'equip': return equip(c, a.id, fx);
@@ -223,7 +296,7 @@ export function act(c, a, ctx, fx) {
       if (!it || it.kind !== 'consumable') return false;
       if (!c.inv[a.id]) return deny(fx, `Sem ${it.name}! Compre com a Mercadora Lia.`);
       if (c.hp >= c.maxHp) { fx.push({ k: 'sfx', name: 'deny' }, { k: 'log', text: 'Vida já está cheia.', cls: 'info' }); return false; }
-      removeItem(c, a.id);
+      removeItem(c.inv, a.id);
       const heal = Math.round(c.maxHp * it.heal);
       c.hp = Math.min(c.maxHp, c.hp + heal);
       fx.push({ k: 'sfx', name: 'potion' }, { k: 'heal', n: heal, color: '#7dff7d' });
@@ -253,9 +326,9 @@ export function act(c, a, ctx, fx) {
       const r = qd.reward;
       c.gold += r.gold || 0;
       const got = [];
-      for (const [id, n] of Object.entries(r.items || {})) { addItem(c, id, n); got.push(`${n}x ${ITEMS[id].name}`); }
+      for (const [id, n] of Object.entries(r.items || {})) { addItem(c.inv, id, n); got.push(`${n}x ${ITEMS[id].name}`); }
       fx.push({ k: 'sfx', name: 'quest' }, { k: 'sfx', name: 'coin' },
-        { k: 'log', text: `Recompensa: ${r.gold} ouro${got.length ? `, ${got.join(', ')}` : ''}`, cls: 'gold' });
+        { k: 'log', text: `Recompensa: ${r.gold} 🪙${got.length ? `, ${got.join(', ')}` : ''}`, cls: 'gold' });
       // equipa sozinho o que for melhor que o atual
       for (const id of Object.keys(r.items || {})) {
         const ri = ITEMS[id], w = weaponOf(c);
@@ -273,8 +346,13 @@ export function act(c, a, ctx, fx) {
       if (!l) { fx.push({ k: 'lootGone', lid: a.lid }); return false; }
       if (!near(ctx.pos, l.x, l.z, LOOT_REACH) || ctx.now - l.t < 0.5) return false;
       ctx.loot.items.delete(a.lid);
-      addItem(c, l.item);
-      fx.push({ k: 'lootGone', lid: a.lid }, { k: 'sfx', name: 'pickup' }, { k: 'pickup', item: l.item });
+      if (l.item === 'gold') {
+        c.gold += l.n;
+        fx.push({ k: 'lootGone', lid: a.lid }, { k: 'sfx', name: 'coin' }, { k: 'pickup', item: 'gold', n: l.n });
+      } else {
+        addItem(c.inv, l.item);
+        fx.push({ k: 'lootGone', lid: a.lid }, { k: 'sfx', name: 'pickup' }, { k: 'pickup', item: l.item });
+      }
       return true;
     }
     case 'respawn': {
@@ -282,6 +360,115 @@ export function act(c, a, ctx, fx) {
       c.dead = false;
       c.hp = c.maxHp;
       fx.push({ k: 'respawn', pos: [...SPAWN_POINT] }); // quem move o jogador é quem chamou (servidor: teleport)
+      return true;
+    }
+
+    // ---------- baús de tesouro ----------
+    case 'open_chest': {
+      const t = TREASURES.find((tt) => tt.id === a.id);
+      if (!t) return false;
+      if (!near(ctx.pos, t.x, t.z, INTERACT_RANGE.chest)) return deny(fx);
+      const left = treasureLeft(c, t, clock);
+      if (left > 0) return deny(fx, `Este baú está vazio. Volte em ${fmtMin(left)}.`);
+      const loot = rollTreasure(t.tier, ctx.rand || Math.random);
+      c.chests[t.id] = clock;
+      scatter(ctx, fx, t.x, t.z, [['gold', loot.gold], ...loot.items.map((id) => [id, 1])]);
+      fx.push({ k: 'chest', id: t.id }, { k: 'sfx', name: 'drop', at: t },
+        { k: 'log', text: `💎 Baú do tesouro aberto: ${loot.gold} 🪙 e ${loot.items.length} item(ns)!`, cls: 'gold' });
+      return true;
+    }
+
+    // ---------- portas ----------
+    case 'enter_mine':
+      if (!near(ctx.pos, MINE_DOOR.x, MINE_DOOR.z, INTERACT_RANGE.door + 1)) return deny(fx);
+      fx.push({ k: 'teleport', x: MINE_ENTRY.x, z: MINE_ENTRY.z, region: 'mine' }, { k: 'log', text: '⛏️ Você entrou na Mina Abandonada. Cuidado com o escuro...', cls: 'info' });
+      return true;
+    case 'leave_mine': {
+      if (!near(ctx.pos, MINE_EXIT.x, MINE_EXIT.z, INTERACT_RANGE.door + 1)) return deny(fx);
+      const r = Math.hypot(MINE_DOOR.x, MINE_DOOR.z);
+      fx.push({ k: 'teleport', x: MINE_DOOR.x - (MINE_DOOR.x / r) * 3, z: MINE_DOOR.z - (MINE_DOOR.z / r) * 3, region: 'world' });
+      return true;
+    }
+    case 'enter_home':
+      if (!near(ctx.pos, HOME_DOOR.x, HOME_DOOR.z, INTERACT_RANGE.door)) return deny(fx);
+      fx.push({ k: 'teleport', x: HOME_ENTRY.x, z: HOME_ENTRY.z, region: 'home' }, { k: 'log', text: '🏠 Bem-vindo à sua casa.', cls: 'info' });
+      return true;
+    case 'leave_home':
+      if (!near(ctx.pos, HOME_EXIT.x, HOME_EXIT.z, INTERACT_RANGE.door)) return deny(fx);
+      fx.push({ k: 'teleport', x: HOME_DOOR.x, z: HOME_DOOR.z, region: 'world' });
+      return true;
+
+    // ---------- casa: armário (equipamento), baú (poções), cofre (ouro) ----------
+    case 'store': case 'take': {
+      const box = a.box;
+      const f = HOME_FURNITURE[box];
+      if (!f || (box !== 'rack' && box !== 'chest')) return false;
+      if (!inHome(ctx.pos?.x, ctx.pos?.z) || !near(ctx.pos, f.x, f.z, INTERACT_RANGE.furniture)) return deny(fx, `Chegue perto do ${f.name}.`);
+      if (!it || (box === 'rack' ? !gearOk(it) : !potionOk(it))) return deny(fx, box === 'rack' ? 'O armário guarda só armas e armaduras.' : 'O baú guarda só poções.');
+      const bag = c.home[box];
+      if (a.a === 'store') {
+        if (!c.inv[a.id]) return false;
+        const n = qty(c.inv[a.id]);
+        const remaining = c.inv[a.id] - n;
+        if (remaining <= 0 && c.equipped === a.id) return deny(fx, 'Equipe outra arma antes de guardar esta.');
+        if (remaining <= 0 && c.armor === a.id) c.armor = null;
+        if (remaining <= 0 && c.helmet === a.id) c.helmet = null;
+        removeItem(c.inv, a.id, n); addItem(bag, a.id, n);
+        fx.push({ k: 'sfx', name: 'equip' }, { k: 'log', text: `Guardou ${n}x ${it.icon} ${it.name} no ${f.name}.`, cls: 'info' });
+      } else {
+        if (!bag[a.id]) return false;
+        const n = qty(bag[a.id]);
+        removeItem(bag, a.id, n); addItem(c.inv, a.id, n);
+        fx.push({ k: 'sfx', name: 'pickup' }, { k: 'log', text: `Pegou ${n}x ${it.icon} ${it.name} do ${f.name}.`, cls: 'info' });
+      }
+      return true;
+    }
+    case 'deposit': case 'withdraw': {
+      const f = HOME_FURNITURE.safe;
+      if (!inHome(ctx.pos?.x, ctx.pos?.z) || !near(ctx.pos, f.x, f.z, INTERACT_RANGE.furniture)) return deny(fx, 'Chegue perto do cofre.');
+      const from = a.a === 'deposit' ? c.gold : c.home.safe;
+      if (from <= 0) return deny(fx);
+      const n = qty(from);
+      if (a.a === 'deposit') { c.gold -= n; c.home.safe += n; } else { c.home.safe -= n; c.gold += n; }
+      fx.push({ k: 'sfx', name: 'coin' }, { k: 'log', text: `${a.a === 'deposit' ? 'Guardou' : 'Retirou'} ${n} 🪙 ${a.a === 'deposit' ? 'no' : 'do'} cofre.`, cls: 'gold' });
+      return true;
+    }
+
+    // ---------- classe e árvore de habilidades ----------
+    case 'choose_class': {
+      const cl = CLASSES[a.cls];
+      if (!cl || c.cls) return deny(fx, c.cls ? 'Você já escolheu sua classe.' : null);
+      if (c.level < CLASS_LEVEL) return deny(fx, `Você escolhe a classe no nível ${CLASS_LEVEL}.`);
+      c.cls = a.cls; c.skills = {};
+      recalcHp(c);
+      fx.push({ k: 'sfx', name: 'levelUp' }, { k: 'classChosen', cls: a.cls },
+        { k: 'log', text: `${cl.icon} Agora você é ${cl.name}! ${cl.passive}.`, cls: 'good' });
+      if (cl.starter) { // presente: a arma (ou armadura) da classe, já equipada
+        addItem(c.inv, cl.starter);
+        fx.push({ k: 'log', text: `🎁 Presente de classe: ${ITEMS[cl.starter].icon} ${ITEMS[cl.starter].name}.`, cls: 'gold' });
+        equip(c, cl.starter, fx);
+      }
+      return true;
+    }
+    case 'skill_up': {
+      if (!c.cls) return deny(fx, 'Escolha uma classe primeiro.');
+      const why = canRaise(c, a.node);
+      if (why) return deny(fx, why);
+      c.skills[a.node] = (c.skills[a.node] || 0) + 1;
+      recalcHp(c);
+      const n = nodeOf(c.cls, a.node);
+      fx.push({ k: 'sfx', name: 'equip' }, { k: 'skillUp', node: a.node },
+        { k: 'log', text: `${n.icon} ${n.name} ${n.max > 1 ? `${c.skills[a.node]}/${n.max}` : 'aprendida'}!`, cls: 'good' });
+      return true;
+    }
+    case 'respec': {
+      if (!c.cls || !Object.keys(c.skills).length) return deny(fx, 'Nada para redistribuir.');
+      if (!near(ctx.pos, NPCS.elder.x, NPCS.elder.z, INTERACT_RANGE.npc)) return deny(fx, `Fale com o ${NPCS.elder.name} para redistribuir os pontos.`);
+      const cost = RESPEC_COST(c.level);
+      if (c.gold < cost) return deny(fx, `Custa ${cost} 🪙.`);
+      c.gold -= cost; c.skills = {};
+      c.maxHp = maxHpOf(c); c.hp = Math.min(c.hp, c.maxHp);
+      fx.push({ k: 'sfx', name: 'coin' }, { k: 'log', text: `Pontos de habilidade devolvidos (−${cost} 🪙).`, cls: 'info' });
       return true;
     }
     default: return false;

@@ -129,7 +129,8 @@ for (let i = 0; i < 30 && !A.fx.some((f) => f.k === 'hurt'); i++) {
   A.state(); await sleep(100);
 }
 const hurtFx = A.fx.find((f) => f.k === 'hurt');
-ok(!!hurtFx && A.char.hp === hp0 - hurtFx.dmg, `A levou ${hurtFx?.dmg} de dano: vida ${hp0}→${A.char.hp}`);
+const hurtSum = A.fx.filter((f) => f.k === 'hurt').reduce((t, f) => t + f.dmg, 0); // às vezes 2 slimes batem juntos
+ok(!!hurtFx && A.char.hp === hp0 - hurtSum, `A levou ${hurtSum} de dano: vida ${hp0}→${A.char.hp}`);
 await A.walk(-10, 8); // sai da floresta
 
 console.log('\n— Loja (perto da Mercadora Lia) —');

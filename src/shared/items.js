@@ -7,9 +7,20 @@ export const ITEMS = {
   steel_sword: { name: 'Espada de Aço', icon: '🗡️', kind: 'weapon', style: 'melee', bonus: 18, color: 0x8fb3d9, price: 260, sell: 110 },
   rune_blade: { name: 'Lâmina Rúnica', icon: '🗡️', kind: 'weapon', style: 'melee', bonus: 32, color: 0x9b6bff, price: 480, sell: 200 },
 
+  // Adagas: corpo a corpo, menos dano por golpe mas golpes bem mais rápidos (cdMul). Combinam com o Ladino.
+  iron_dagger: { name: 'Adaga de Ferro', icon: '🔪', kind: 'weapon', style: 'melee', sub: 'dagger', bonus: 3, cdMul: 0.75, color: 0xcfd6de, price: 110, sell: 45 },
+  steel_dagger: { name: 'Adaga de Aço', icon: '🔪', kind: 'weapon', style: 'melee', sub: 'dagger', bonus: 10, cdMul: 0.75, color: 0x8fb3d9, price: 250, sell: 100 },
+  shadow_dagger: { name: 'Adaga Sombria', icon: '🔪', kind: 'weapon', style: 'melee', sub: 'dagger', bonus: 20, cdMul: 0.75, color: 0x3d2a5c, price: null, sell: 210, desc: 'Só cai de monstros.' },
+
   short_bow: { name: 'Arco Curto', icon: '🏹', kind: 'weapon', style: 'ranged', bonus: 8, range: 22, color: 0x9a6a3a, price: 140, sell: 55 },
   long_bow: { name: 'Arco Longo', icon: '🏹', kind: 'weapon', style: 'ranged', bonus: 18, range: 28, color: 0x5a3a1a, price: 300, sell: 120 },
   elven_bow: { name: 'Arco Élfico', icon: '🏹', kind: 'weapon', style: 'ranged', bonus: 32, range: 32, color: 0x5fd6a0, price: null, sell: 220, desc: 'Só cai de monstros.' },
+
+  // Cajados: magia à distância que explode em área (splash). Combinam com o Arcanista.
+  apprentice_staff: { name: 'Cajado de Aprendiz', icon: '🪄', kind: 'weapon', style: 'magic', bonus: 5, range: 20, color: 0x7fd0ff, price: 130, sell: 50 },
+  crystal_staff: { name: 'Cajado de Cristal', icon: '🪄', kind: 'weapon', style: 'magic', bonus: 15, range: 24, color: 0x6fe3d8, price: 290, sell: 115 },
+  rune_staff: { name: 'Cajado Rúnico', icon: '🪄', kind: 'weapon', style: 'magic', bonus: 28, range: 26, color: 0x9b6bff, price: 520, sell: 210 },
+  ancient_staff: { name: 'Cajado Ancestral', icon: '🪄', kind: 'weapon', style: 'magic', bonus: 32, range: 28, color: 0xffb347, price: null, sell: 230, desc: 'Só cai de monstros.' },
 
   // Armaduras: mesmas cores/tiers das armas (couro ≈ madeira, ferro, aço, rúnica, élfica)
   leather_armor: { name: 'Armadura de Couro', icon: '🦺', kind: 'armor', def: 3, color: 0x9a6a3a, price: 60, sell: 20 },
@@ -28,7 +39,9 @@ export const ITEMS = {
 export const SHOP = [
   'potion', 'big_potion',
   'wood_sword', 'iron_sword', 'steel_sword', 'rune_blade',
+  'iron_dagger', 'steel_dagger',
   'short_bow', 'long_bow',
+  'apprentice_staff', 'crystal_staff', 'rune_staff',
   'leather_armor', 'iron_armor', 'steel_armor', 'rune_armor',
   'leather_helmet', 'iron_helmet', 'steel_helmet', 'rune_helmet',
 ];
@@ -37,15 +50,19 @@ export const SHOP = [
 export const SLOTS = { weapon: 'equipped', armor: 'armor', helmet: 'helmet' };
 
 export const CATEGORIES = [
-  ['consumable', '🧪 Consumíveis'], ['melee', '⚔️ Espadas'], ['ranged', '🏹 Arcos'],
-  ['armor', '🛡️ Armaduras'], ['helmet', '⛑️ Capacetes'],
+  ['consumable', '🧪 Consumíveis'], ['melee', '⚔️ Espadas'], ['dagger', '🔪 Adagas'], ['ranged', '🏹 Arcos'],
+  ['magic', '🪄 Cajados'], ['armor', '🛡️ Armaduras'], ['helmet', '⛑️ Capacetes'],
 ];
-export const category = (it) => (it.kind === 'weapon' ? it.style : it.kind);
+export const category = (it) => (it.kind === 'weapon' ? (it.sub || it.style) : it.kind);
 
+/** Tempo entre golpes por estilo (adagas multiplicam por cdMul). range = alcance do corpo a corpo. */
 export const ATTACK = {
   melee: { cooldown: 0.5, range: 3.2 },
   ranged: { cooldown: 0.75 },
+  magic: { cooldown: 0.8 },
 };
+/** Explosão básica de todo cajado: raio e % do dano nos monstros em volta do alvo */
+export const MAGIC_SPLASH = { r: 1.8, pct: 0.5 };
 
 /** Defesa vira % de redução de dano com retorno decrescente: def/(def+25). Conjunto rúnico (27) ≈ 52%. */
 export const damageReduction = (def) => def / (def + 25);
@@ -55,25 +72,51 @@ export function itemStats(it) {
   let s;
   if (it.kind === 'armor' || it.kind === 'helmet') s = `Defesa +${it.def}`;
   else if (it.style === 'ranged') s = `Distância · Dano +${it.bonus} · Alcance ${it.range}m`;
+  else if (it.style === 'magic') s = `Magia em área · Dano +${it.bonus} · Alcance ${it.range}m`;
+  else if (it.sub === 'dagger') s = `Corpo a corpo rápido · Dano +${it.bonus} · ${Math.round(1 / it.cdMul * 100 - 100)}% mais golpes`;
   else s = `Corpo a corpo · Dano +${it.bonus}`;
   return it.desc ? `${s} · ${it.desc}` : s;
 }
 
 const DROPS = [
   ['potion', 38], ['big_potion', 18],
-  ['iron_sword', 6], ['short_bow', 6], ['leather_armor', 6], ['leather_helmet', 6],
-  ['steel_sword', 4], ['long_bow', 4], ['iron_armor', 4], ['iron_helmet', 4],
+  ['iron_sword', 5], ['short_bow', 5], ['iron_dagger', 4], ['apprentice_staff', 4], ['leather_armor', 6], ['leather_helmet', 6],
+  ['steel_sword', 3], ['long_bow', 3], ['steel_dagger', 2.5], ['crystal_staff', 2.5], ['iron_armor', 4], ['iron_helmet', 4],
   ['steel_armor', 2.5], ['steel_helmet', 2.5],
-  ['rune_blade', 2], ['elven_bow', 2], ['elven_armor', 1.5], ['elven_helmet', 1.5],
+  ['rune_blade', 1.5], ['elven_bow', 1.5], ['shadow_dagger', 1.5], ['ancient_staff', 1.5], ['elven_armor', 1.5], ['elven_helmet', 1.5],
 ];
 
-const BOSS_DROPS = ['rune_blade', 'elven_bow', 'rune_armor', 'elven_armor', 'rune_helmet', 'elven_helmet'];
+const BOSS_DROPS = ['rune_blade', 'elven_bow', 'shadow_dagger', 'ancient_staff', 'rune_armor', 'elven_armor', 'rune_helmet', 'elven_helmet'];
+
+const pickWeighted = (list, rand) => {
+  const total = list.reduce((s, [, w]) => s + w, 0);
+  let r = rand() * total;
+  for (const [id, w] of list) { if ((r -= w) <= 0) return id; }
+  return list[0][0];
+};
 
 /** Sorteia o item que cai a cada 5 abates. Chefes sempre deixam um equipamento raro. */
 export function rollDrop(boss = false, rand = Math.random) {
   if (boss) return BOSS_DROPS[Math.floor(rand() * BOSS_DROPS.length)];
-  const total = DROPS.reduce((s, [, w]) => s + w, 0);
-  let r = rand() * total;
-  for (const [id, w] of DROPS) { if ((r -= w) <= 0) return id; }
-  return 'potion';
+  return pickWeighted(DROPS, rand);
+}
+
+/**
+ * Baús de tesouro: moedas + vários itens. tier 1 (superfície), 2 (biomas/mina), 3 (sala do chefe).
+ * Tiers maiores tiram as poções comuns da lista e pesam mais os itens raros.
+ */
+export const TREASURE_LOOT = {
+  1: { gold: [15, 40], items: [1, 2], rareBoost: 1 },
+  2: { gold: [45, 100], items: [2, 3], rareBoost: 2.5 },
+  3: { gold: [150, 280], items: [3, 4], rareBoost: 5, guaranteedRare: true },
+};
+export function rollTreasure(tier, rand = Math.random) {
+  const t = TREASURE_LOOT[tier] || TREASURE_LOOT[1];
+  const gold = t.gold[0] + Math.floor(rand() * (t.gold[1] - t.gold[0] + 1));
+  const table = DROPS.map(([id, w]) => [id, ITEMS[id].kind === 'consumable' ? w : w * t.rareBoost]);
+  const n = t.items[0] + Math.floor(rand() * (t.items[1] - t.items[0] + 1));
+  const items = [];
+  for (let i = 0; i < n; i++) items.push(pickWeighted(table, rand));
+  if (t.guaranteedRare) items.push(rollDrop(true, rand));
+  return { gold, items };
 }

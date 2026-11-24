@@ -163,3 +163,64 @@ button.keycap-btn.listening { background: #f5b82e; animation: pulse .8s infinite
 #lerror { color: #ff8b8b; font-size: 13px; min-height: 16px; }
 #lsubmit { padding: 11px; font-size: 16px; }
 #loffline { margin-top: 4px; }
+
+/* ---------- moeda dourada ---------- */
+.coin { display: inline-block; width: .95em; height: .95em; border-radius: 50%; vertical-align: -0.12em;
+  background: radial-gradient(circle at 35% 30%, #fff6c2 0 12%, #ffd84a 30%, #e0a515 70%, #a8700a 100%);
+  box-shadow: inset 0 0 0 .08em #b8860b, 0 0 .25em rgba(255, 200, 40, .45); }
+.float .coin { width: .85em; height: .85em; }
+
+/* ---------- classe no HUD / habilidade ---------- */
+#pclass { min-height: 22px; gap: 6px; align-items: center; }
+#pclass .clsname { font-weight: 700; font-size: 13px; }
+#pclass .muted { opacity: .6; }
+#pclass .pts { font-size: 12px; padding: 2px 8px; background: #f5b82e; color: #2a1d00; }
+#pclass .pulse { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(245, 184, 46, .35); } }
+#skillbtn { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); width: 64px; height: 64px; border-radius: 14px;
+  font-size: 30px; padding: 0; background: rgba(20, 24, 34, .85); border: 2px solid #f5b82e; overflow: hidden; z-index: 6; }
+#skillbtn .skey { position: absolute; top: 2px; right: 5px; font-size: 11px; color: #ffe9a8; font-weight: 700; }
+#skillbtn .scd { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 800; color: #fff; text-shadow: 0 2px 3px #000; }
+#skillbtn::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: var(--cd, 0%); background: rgba(0, 0, 0, .6); }
+#skillbtn.cooling { border-color: #666; }
+#region { margin-top: 4px; text-align: center; font-size: 12px; font-weight: 700; color: #ffe9a8; text-shadow: 0 1px 2px #000; }
+
+/* ---------- morte ---------- */
+#deathinfo p { margin: 6px 0; }
+#deathinfo .bad { color: #ff8a80; font-weight: 700; }
+#deathinfo .tip { font-size: 14px; opacity: .85; max-width: 520px; }
+
+/* ---------- janelas novas ---------- */
+#mtitle .warn { font-size: 12px; font-weight: 400; color: #ffb3a8; margin-left: 10px; }
+.classes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.ccard { border: 2px solid var(--c); border-radius: 12px; padding: 12px; background: rgba(255, 255, 255, .04); display: flex; flex-direction: column; gap: 4px; }
+.ccard .cicon { font-size: 34px; }
+.ccard b { font-size: 18px; color: var(--c); }
+.ccard .from { opacity: .6; font-size: 11px; }
+.ccard p { margin: 4px 0; font-size: 13px; }
+.ccard .pas { font-size: 12px; opacity: .9; }
+.ccard button { margin-top: auto; background: var(--c); color: #111; font-weight: 700; }
+.statline { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; margin: 6px 0 12px; }
+.tree { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.trow { display: flex; gap: 10px; align-items: center; justify-content: center; }
+.tlink { font-size: 12px; opacity: .7; }
+.arrow { font-size: 22px; opacity: .6; }
+.node { width: 190px; border: 2px solid #444; border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 4px; background: rgba(255, 255, 255, .03); }
+.node.have { border-color: var(--c); background: rgba(255, 255, 255, .07); }
+.node.locked { opacity: .45; }
+.node.active { box-shadow: 0 0 0 2px rgba(245, 184, 46, .35) inset; }
+.node .nicon { font-size: 26px; }
+.node small { font-size: 12px; opacity: .85; min-height: 32px; }
+.pips { display: flex; gap: 4px; }
+.pips i { width: 14px; height: 6px; border-radius: 3px; background: #333; }
+.pips i.on { background: var(--c); }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid.one { grid-template-columns: 1fr; }
+.safe { display: flex; gap: 14px; margin: 8px 0 14px; }
+.sbox { flex: 1; border: 1px solid #555; border-radius: 10px; padding: 12px; text-align: center; }
+.sbox b { display: block; font-size: 24px; margin-top: 4px; }
+.safeact { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.amt { width: 110px; padding: 6px 8px; border-radius: 8px; border: 1px solid #555; background: #111; color: #fff; }
+#modal.class, #modal.tree { width: min(980px, 96vw); }
+
+#region { position: fixed; top: 192px; right: 14px; width: 170px; }

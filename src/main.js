@@ -1,14 +1,18 @@
 import * as THREE from 'three';
 import { buildWorld, makeLabel } from './world.js';
-import { createCharacter, animateCharacter, flash, setGear } from './character.js';
+import { createCharacter, animateCharacter, flash, setGear, setWeapon } from './character.js';
 import { EnemyManager, TYPES } from './enemies.js';
 import { QUESTS } from './quests.js';
 import { ITEMS, ATTACK, SLOTS } from './items.js';
 import {
   newCharacter, normalizeCharacter, publicCharacter, LootBag, act, kill, hurt, xpToNext,
-  weaponOf, defenseOf, isEquipped as isEquippedBy, rollDamage as rollDamageFor,
+  weaponOf, defenseOf, isEquipped as isEquippedBy, nextDeathPct, treasureLeft,
 } from './shared/progress.js';
-import { NPCS, WELL, INTERACT_RANGE } from './shared/worldData.js';
+import {
+  NPCS, WELL, INTERACT_RANGE, TREASURES, MINE_DOOR, MINE_EXIT, HOME_DOOR, HOME_EXIT, HOME_FURNITURE, regionAt, biomeAt, BIOMES,
+} from './shared/worldData.js';
+import { CLASSES, SKILLS, statsOf, activeSkillOf } from './shared/classes.js';
+import { attackCooldown, weaponRange } from './shared/combatRules.js';
 import { ROLES, roleOf, tagged, can, STAFF_COMMANDS } from './shared/roles.js';
 import { Input, keyLabel } from './input.js';
 import { UI } from './ui.js';
@@ -39,7 +43,11 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x4a6b3a, 1.6));
+const hemi = new THREE.HemisphereLight(0xffffff, 0x4a6b3a, 1.6);
+scene.add(hemi);
+// lanterna do jogador: só acende na mina (raio ~18 m) para os monstros não sumirem no escuro
+const lantern = new THREE.PointLight(0xffd9a0, 0, 18, 1.3);
+scene.add(lantern);
 const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
@@ -63,7 +71,7 @@ let remote = null; // outros jogadores
 
 // Monstros: offline a IA roda aqui; online o servidor manda e todo mundo vê os mesmos monstros
 const enemies = new EnemyManager(scene, world, sfx, { online: session.online });
-const projectiles = new Projectiles(scene, world, enemies, (e, dir) => enemies.arrowHit(e, dir.x, dir.z, rollDamage));
+const projectiles = new Projectiles(scene, world, enemies, (e, kind) => enemies.projectileHit(e, kind));
 projectiles.onWorld = (pos) => sfx('arrowHit', pos, 0.7);
 
 // ---------- Personagem / save ----------
@@ -100,13 +108,11 @@ const player = {
 };
 const hero = createCharacter({ shirt: 0xd9433b, pants: 0x2b3a67, hair: 0x3b2414, weapon: true, bow: true });
 scene.add(hero.root);
+enemies.local.char = player; // offline: as regras de ataque usam o personagem local
 
 const weapon = () => weaponOf(player);
 function refreshWeapon() {
-  const w = weapon();
-  hero.sword.visible = w.style === 'melee';
-  hero.bow.visible = w.style === 'ranged';
-  (w.style === 'melee' ? hero.sword.userData.blade : hero.bow.userData.limb).material.color.setHex(w.color);
+  setWeapon(hero, weapon());
   setGear(hero, { armorColor: ITEMS[player.armor]?.color ?? null, helmetColor: ITEMS[player.helmet]?.color ?? null });
 }
 refreshWeapon();
@@ -118,10 +124,7 @@ const isEquipped = (id) => isEquippedBy(player, id);
 const facing = () => new THREE.Vector3(Math.sin(player.rotY), 0, Math.cos(player.rotY));
 const headPos = (p, hgt = 2.8) => new THREE.Vector3(p.x, hgt, p.z);
 const distXZ = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
-/** dano do golpe (só offline; online o servidor rola o dano com o nível e a arma dele) */
-const rollDamage = () => rollDamageFor(player);
-
-const CHAR_KEYS = ['level', 'xp', 'gold', 'maxHp', 'hp', 'kills', 'inv', 'equipped', 'armor', 'helmet', 'quest'];
+const CHAR_KEYS = ['level', 'xp', 'gold', 'maxHp', 'hp', 'kills', 'inv', 'equipped', 'armor', 'helmet', 'quest', 'cls', 'skills', 'chests', 'home', 'deaths'];
 /** personagem vindo do servidor substitui o local */
 function applyChar(c) {
   if (!c) return;
@@ -131,7 +134,7 @@ function applyChar(c) {
   ui.refresh();
 }
 
-const ctxLocal = () => ({ pos: player.pos, now: player.t, rand: Math.random, loot: localLoot });
+const ctxLocal = () => ({ pos: player.pos, now: player.t, clock: Date.now(), rand: Math.random, loot: localLoot });
 /** Pedido do jogador: offline aplica as regras aqui; online manda pro servidor e espera o resultado (fx). */
 function request(a) {
   if (net) { net.send({ t: 'act', ...a }); return; }
@@ -152,9 +155,10 @@ function applyFx(list = []) {
       case 'float': ui.float(headPos(at(f), f.h ?? 2.8), f.text, f.color, f.size); break;
       case 'levelUp': ui.float(headPos(player.pos, 3.8), 'LEVEL UP!', '#f5b82e', 30); sfx('levelUp'); break;
       case 'heal': ui.float(headPos(player.pos), `+${f.n}`, f.color, 22); break;
-      case 'loot': loot.drop(f.item, { x: f.x, z: f.z }, f.lid); break;
+      case 'loot': loot.drop(f.item, { x: f.x, z: f.z }, f.lid, f.n); break;
       case 'lootGone': loot.remove(f.lid); break;
       case 'pickup': {
+        if (f.item === 'gold') { ui.float(headPos(player.pos, 3.4), `+${f.n} 🪙`, '#ffd65c', 20); break; }
         const it = ITEMS[f.item], gear = !!SLOTS[it.kind];
         ui.float(headPos(player.pos, 3.4), `${it.icon} ${it.name}`, gear ? '#d9b3ff' : '#b8ffb0', 18);
         ui.log(`Pegou ${it.icon} ${it.name}!${gear ? ` Abra o inventário [${keyLabel(input.bindings.inventory.find(Boolean))}] para equipar.` : ''}`, 'good');
@@ -179,9 +183,10 @@ function applyFx(list = []) {
         player.dead = true;
         sfx('playerDie');
         lockTarget = null;
-        ui.log(`Você foi derrotado por ${f.by}.${f.lost ? ` Perdeu ${f.lost} de ouro.` : ''}`, 'bad');
+        ui.log(`Você foi derrotado por ${f.by}.${f.lost ? ` Perdeu ${f.lost} 🪙.` : ''}${f.items ? ` Perdeu ${f.items} item(ns).` : ''}`, 'bad');
         ui.closeDialog(); ui.closeModal();
-        ui.death(true, () => request({ a: 'respawn' }));
+        ui.death(true, () => request({ a: 'respawn' }), f.pct != null ? { ...f, nextPct: nextDeathPct(player) } : null);
+        gearChanged = true;
         break;
       case 'respawn':
         player.dead = false;
@@ -190,6 +195,16 @@ function applyFx(list = []) {
         ui.death(false);
         break;
       case 'closeDialog': ui.closeDialog(); break;
+      case 'teleport':
+        player.pos.set(f.x, 0, f.z); player.vy = 0;
+        lockTarget = null;
+        ui.closeModal();
+        sfx('quest');
+        break;
+      case 'chest': world.treasures.find((t) => t.id === f.id).open = true; break;
+      case 'chooseClass': break; // o HUD mostra o botão "Escolher classe"
+      case 'classChosen': ui.closeModal(); ui.openModal('tree'); break;
+      case 'skillUp': break;
       default: break;
     }
   }
@@ -204,7 +219,16 @@ const buy = (id) => request({ a: 'buy', id });
 const sell = (id) => request({ a: 'sell', id });
 /** só para testes offline no console */
 function addItem(id, n = 1) { player.inv[id] = (player.inv[id] || 0) + n; ui.refresh(); }
-ui.setGame({ player, buy, sell, use: useItem, equip, unequip, isEquipped, defense });
+ui.setGame({
+  player, buy, sell, use: useItem, equip, unequip, isEquipped, defense,
+  chooseClass: (cls) => request({ a: 'choose_class', cls }),
+  skillUp: (node) => request({ a: 'skill_up', node }),
+  respec: () => request({ a: 'respec' }),
+  store: (box, id, n) => request({ a: 'store', box, id, n }),
+  take: (box, id, n) => request({ a: 'take', box, id, n }),
+  deposit: (n) => request({ a: 'deposit', n }),
+  withdraw: (n) => request({ a: 'withdraw', n }),
+});
 
 // ---------- NPCs ----------
 const npcs = [
@@ -239,16 +263,20 @@ function setMarker(t) {
   marker.material.map.needsUpdate = true;
 }
 
+/** o Ancião também redistribui os pontos de habilidade */
+const respecButton = () => (player.cls && Object.keys(player.skills).length
+  ? [{ label: '↺ Redistribuir pontos', onClick: () => request({ a: 'respec' }) }] : []);
+
 function talk(npc) {
   if (npc.id === 'merchant') { ui.shopTab = 'buy'; return ui.openModal('shop'); }
   const q = player.quest, def = QUESTS[q.idx];
-  if (q.status === 'done') return ui.dialog(npc.name, 'Graças a você a Vila Pedraverde está em paz. Novas aventuras virão em breve...');
+  if (q.status === 'done') return ui.dialog(npc.name, 'Graças a você a Vila Pedraverde está em paz. Novas aventuras virão em breve...', respecButton());
   if (q.status === 'available') {
     return ui.dialog(`${npc.name} — ${def.title}`, def.intro, [{
       label: 'Aceitar missão', onClick: () => request({ a: 'quest_accept' }),
     }]);
   }
-  if (q.status === 'active') return ui.dialog(npc.name, `${def.progressText(q.progress, def.count)}. Vá até ${def.where.label} (siga a ★ no mapa).`);
+  if (q.status === 'active') return ui.dialog(npc.name, `${def.progressText(q.progress, def.count)}. Vá até ${def.where.label} (siga a ★ no mapa).`, respecButton());
   if (q.status === 'complete') {
     return ui.dialog(npc.name, def.doneText, [{
       label: 'Receber recompensa', onClick: () => request({ a: 'quest_turnin' }),
@@ -269,7 +297,8 @@ scene.add(ring);
 const raycaster = new THREE.Raycaster();
 
 const alive = (e) => e && e.state !== 'dead';
-const maxLockRange = () => (weapon().style === 'ranged' ? weapon().range + 6 : 30);
+const ranged = () => weapon().style !== 'melee'; // arco e cajado atiram projéteis
+const maxLockRange = () => (ranged() ? weaponRange(player) + 6 : 30);
 
 function findAutoTarget(range) {
   const camF = new THREE.Vector3(-Math.sin(cam.yaw), 0, -Math.cos(cam.yaw));
@@ -281,13 +310,14 @@ function findAutoTarget(range) {
     if (d > range) continue;
     const dir = new THREE.Vector3(e.pos.x - player.pos.x, 0, e.pos.z - player.pos.z).normalize();
     if (Math.max(dir.dot(f), dir.dot(camF)) < 0.5 && d > 4) continue; // cone de ~60°
+    if (!world.los(player.pos.x, player.pos.z, e.pos.x, e.pos.z)) continue; // atrás da parede da mina
     if (d < bestD) { best = e; bestD = d; }
   }
   return best;
 }
 
 function cycleTarget() {
-  const list = enemies.list.filter((e) => alive(e) && distXZ(e.pos, player.pos) < 30)
+  const list = enemies.list.filter((e) => alive(e) && distXZ(e.pos, player.pos) < 30 && world.los(player.pos.x, player.pos.z, e.pos.x, e.pos.z))
     .sort((a, b) => distXZ(a.pos, player.pos) - distXZ(b.pos, player.pos));
   if (!list.length) { lockTarget = null; return; }
   lockTarget = list[(list.indexOf(lockTarget) + 1) % list.length];
@@ -306,7 +336,7 @@ function pickEnemyAt(x, y) {
 
 function currentTarget() {
   if (alive(lockTarget) && distXZ(lockTarget.pos, player.pos) <= maxLockRange()) return lockTarget;
-  return weapon().style === 'ranged' ? autoTarget : null;
+  return ranged() ? autoTarget : null;
 }
 
 // ---------- Combate ----------
@@ -326,27 +356,53 @@ enemies.handlers = {
 function attack() {
   const w = weapon();
   const tgt = currentTarget();
-  if (tgt && (w.style === 'ranged' || distXZ(tgt.pos, player.pos) < 5)) {
+  if (tgt && (ranged() || distXZ(tgt.pos, player.pos) < 5)) {
     player.rotY = Math.atan2(tgt.pos.x - player.pos.x, tgt.pos.z - player.pos.z);
   }
   player.attackAnim = 1;
   player.attackSeq++; // outros jogadores veem o golpe quando esse contador muda
-  player.attackCd = ATTACK[w.style].cooldown;
-  if (w.style === 'ranged') {
+  player.attackCd = attackCooldown(player);
+  if (ranged()) {
+    const magic = w.style === 'magic';
     setTimeout(() => {
       if (player.dead) return;
-      sfx('bow');
-      const from = new THREE.Vector3(player.pos.x, player.pos.y + 1.9, player.pos.z).addScaledVector(facing(), 0.7);
-      projectiles.fire(from, alive(tgt) ? tgt : null, facing(), w.range, rollDamage);
-    }, 160);
+      sfx(magic ? 'crit' : 'bow', null, magic ? 0.5 : 1);
+      const from = new THREE.Vector3(player.pos.x, player.pos.y + (magic ? 2.4 : 1.9), player.pos.z).addScaledVector(facing(), 0.7);
+      projectiles.fire(from, alive(tgt) ? tgt : null, facing(), weaponRange(player), magic ? 'magic' : 'arrow', w.color);
+    }, magic ? 220 : 160);
   } else {
     sfx('swing');
     setTimeout(() => {
       if (player.dead) return;
       const f = facing();
-      enemies.melee(player.pos.x, player.pos.z, f.x, f.z, ATTACK.melee.range, rollDamage);
+      enemies.melee(player.pos.x, player.pos.z, f.x, f.z, weaponRange(player));
     }, 140);
   }
+}
+
+// ---------- Habilidade da classe (tecla G) ----------
+let skillReadyAt = 0; // segundos (relógio do jogo)
+function useSkill() {
+  const id = activeSkillOf(player);
+  if (!id) {
+    ui.log(player.cls ? 'Aprenda a habilidade ativa da sua árvore (K).' : 'Escolha uma classe no nível 2 para ter uma habilidade.', 'info');
+    return;
+  }
+  const S = SKILLS[id];
+  if (player.t < skillReadyAt) return ui.log(`${S.name} recarregando (${Math.ceil(skillReadyAt - player.t)} s).`, 'info');
+  const tgt = S.area === 'target' ? (currentTarget() || findAutoTarget(S.reach ?? weaponRange(player) + 4)) : null;
+  if (S.area === 'target' && !tgt) return ui.log(`${S.name}: trave um alvo no alcance (clique no monstro ou Tab).`, 'info');
+  if (tgt) player.rotY = Math.atan2(tgt.pos.x - player.pos.x, tgt.pos.z - player.pos.z);
+  player.attackAnim = 1;
+  player.attackSeq++;
+  const r = enemies.skill(id, tgt);
+  if (r) onSkillResult(r); // offline responde na hora; online chega por {t:'skill'}
+  else skillReadyAt = player.t + 0.5; // evita repetir o pedido enquanto o servidor responde
+}
+function onSkillResult(r) {
+  if (r.ok) { skillReadyAt = player.t + r.cd; return; }
+  skillReadyAt = 0;
+  if (r.reason) ui.log(r.reason, 'bad');
 }
 
 /** Abate (só offline; online o servidor manda o resultado como fx) */
@@ -368,6 +424,71 @@ function onPlayerHit(dmg, e) {
 // ---------- Poço da vila: única cura fora as poções ----------
 const drinkFromWell = () => request({ a: 'well' });
 
+// ---------- Regiões: superfície, mina (escura) e casa (interior) ----------
+const MINE_BOSS_ROOM = { x: 456, z: 26 };
+const LOOKS = {
+  world: { bg: 0x8fd3ff, fog: [70, 190], hemi: 1.6, sun: 2.2 },
+  mine: { bg: 0x07050a, fog: [10, 42], hemi: 0.45, sun: 0.12, lantern: 26 },
+  home: { bg: 0x1d140d, fog: [30, 60], hemi: 0.9, sun: 0 },
+};
+let region = null;
+let currentBiome = null;
+function setRegion(r) {
+  if (r === region) return;
+  region = r;
+  const L = LOOKS[r];
+  scene.background.setHex(L.bg);
+  scene.fog.color.setHex(L.bg);
+  [scene.fog.near, scene.fog.far] = L.fog;
+  hemi.intensity = L.hemi;
+  lantern.intensity = L.lantern || 0;
+  sun.intensity = L.sun;
+  if (r === 'mine') cam.dist = Math.min(cam.dist, 12);
+  if (r === 'home') cam.dist = 13;
+}
+
+/** baús abertos (por jogador) ficam com a tampa aberta até reaparecerem */
+function syncTreasures() {
+  const now = Date.now();
+  for (const t of world.treasures) t.open = treasureLeft(player, t, now) > 0;
+}
+const mapMarks = () => [
+  ...world.treasures.map((t) => ({ x: t.x, z: t.z, icon: '💎', dim: t.open })),
+  { x: MINE_DOOR.x, z: MINE_DOOR.z, icon: '⛏️' }, { x: MINE_EXIT.x, z: MINE_EXIT.z, icon: '🪜' },
+  { x: HOME_DOOR.x, z: HOME_DOOR.z, icon: '🏠' },
+];
+
+/** a coisa mais próxima com que dá para interagir (E). Retorna { label, run? } */
+function nearestInteractable() {
+  const P = player.pos;
+  const d = (o) => Math.hypot(P.x - o.x, P.z - o.z);
+  const opts = [];
+  for (const n of npcs) if (n.pos.distanceTo(P) < 4) opts.push({ dist: n.pos.distanceTo(P), label: `${n.id === 'merchant' ? 'Abrir loja de' : 'Falar com'} ${n.name}`, run: () => talk(n) });
+  if (d(WELL) < INTERACT_RANGE.well - 1) {
+    opts.push(player.hp < player.maxHp
+      ? { dist: d(WELL), label: 'Beber água do poço (recupera toda a vida)', run: drinkFromWell }
+      : { dist: d(WELL), label: '💧 Poço da vila — sua vida está cheia' });
+  }
+  if (d(MINE_DOOR) < INTERACT_RANGE.door + 0.5) opts.push({ dist: d(MINE_DOOR), label: '⛏️ Entrar na Mina Abandonada (perigo!)', run: () => request({ a: 'enter_mine' }) });
+  if (d(MINE_EXIT) < INTERACT_RANGE.door + 0.5) opts.push({ dist: d(MINE_EXIT), label: '🪜 Subir a escada (sair da mina)', run: () => request({ a: 'leave_mine' }) });
+  if (d(HOME_DOOR) < INTERACT_RANGE.door - 0.3) opts.push({ dist: d(HOME_DOOR), label: '🏠 Entrar na sua casa', run: () => request({ a: 'enter_home' }) });
+  if (region === 'home') {
+    if (d(HOME_EXIT) < INTERACT_RANGE.door - 0.5) opts.push({ dist: d(HOME_EXIT), label: '🚪 Sair de casa', run: () => request({ a: 'leave_home' }) });
+    for (const [k, f] of Object.entries(HOME_FURNITURE)) {
+      if (d(f) < INTERACT_RANGE.furniture - 0.3) opts.push({ dist: d(f), label: `${f.icon} Abrir ${f.name}`, run: () => { ui.homeTab = k; ui.openModal('home'); } });
+    }
+  }
+  for (const t of world.treasures) {
+    if (d(t) > INTERACT_RANGE.chest - 0.3) continue;
+    const left = treasureLeft(player, t);
+    opts.push(left > 0
+      ? { dist: d(t), label: `💎 Baú vazio — volta em ${Math.ceil(left / 60000)} min` }
+      : { dist: d(t), label: `💎 Abrir baú do tesouro${t.tier === 3 ? ' (lendário!)' : t.tier === 2 ? ' (raro)' : ''}`, run: () => request({ a: 'open_chest', id: t.id }) });
+  }
+  opts.sort((a, b) => a.dist - b.dist);
+  return opts[0] || null;
+}
+
 // ---------- Multiplayer ----------
 const bubbles = new Bubbles(scene);
 let sendChat = null;
@@ -388,6 +509,7 @@ if (session.online) {
     loot.clear();
     applyFx(m.loot);
     if (m.c.dead) applyFx([{ k: 'death', by: 'um monstro', lost: 0 }]);
+    syncTreasures();
     remote.clear();
     for (const p of m.players) remote.add(p);
     ui.netStatus(onlineText());
@@ -404,6 +526,7 @@ if (session.online) {
   // progresso e monstros vindos do servidor
   net.on('fx', (m) => { applyChar(m.c); applyFx(m.fx); });
   net.on('setpos', (m) => { player.pos.set(m.x, player.pos.y, m.z); player.vy = 0; });
+  net.on('skill', (m) => onSkillResult(m));
   enemies.send = (msg) => net.send(msg);
   net.on('mobs', (m) => enemies.applySnapshot(m.m));
   net.on('mev', (ev) => enemies.onEvent(ev));
@@ -554,6 +677,7 @@ function update(dt) {
     ui.renderHelp();
   }
   if (input.hit('inventory') && !player.dead && !ui.dialogOpen) ui.toggleModal('inventory');
+  if (input.hit('tree') && !player.dead && !ui.dialogOpen) ui.toggleModal(player.cls ? 'tree' : 'class');
   if (net && input.tapped('Enter') && !ui.isBlocking()) ui.openChat((text) => sendChat(text));
 
   let moveAmount = 0;
@@ -570,7 +694,7 @@ function update(dt) {
     if (mv.lengthSq() > 0) {
       mv.normalize();
       const run = input.held('run');
-      player.pos.addScaledVector(mv, (run ? 13 : 8) * dt);
+      player.pos.addScaledVector(mv, (run ? 13 : 8) * statsOf(player).speed * dt);
       moveAmount = run ? 1 : 0.75;
       let diff = Math.atan2(mv.x, mv.z) - player.rotY;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
@@ -585,20 +709,16 @@ function update(dt) {
     }
     if (input.hit('target')) cycleTarget();
     if (input.hit('attack') && player.attackCd <= 0) attack();
+    if (input.hit('skill')) useSkill();
     if (input.hit('potion')) useItem('potion');
     if (input.hit('bigPotion')) useItem('big_potion');
   }
 
-  // NPC próximo (ou o poço da vila, que cura)
-  let near = null;
-  for (const n of npcs) if (n.pos.distanceTo(player.pos) < 4) near = n;
-  const nearWell = !near && Math.hypot(player.pos.x - WELL.x, player.pos.z - WELL.z) < INTERACT_RANGE.well - 1;
+  // coisa mais próxima para interagir (NPC, poço, portas, móveis da casa, baús de tesouro)
   const talkKey = keyLabel(input.bindings.talk.find(Boolean));
-  if (near && canAct) ui.prompt(`[${talkKey}] ${near.id === 'merchant' ? 'Abrir loja de' : 'Falar com'} ${near.name}`);
-  else if (nearWell && canAct) ui.prompt(player.hp < player.maxHp ? `[${talkKey}] Beber água do poço (recupera toda a vida)` : '💧 Poço da vila — sua vida está cheia');
-  else ui.prompt(null);
-  if (near && canAct && input.hit('talk')) talk(near);
-  if (nearWell && canAct && input.hit('talk')) drinkFromWell();
+  const it = canAct ? nearestInteractable() : null;
+  ui.prompt(it ? (it.run ? `[${talkKey}] ${it.label}` : it.label) : null);
+  if (it?.run && input.hit('talk')) it.run();
 
   // física
   player.vy -= 28 * dt;
@@ -607,7 +727,7 @@ function update(dt) {
   world.resolve(player.pos, 0.6);
 
   player.attackCd -= dt;
-  player.attackAnim = Math.max(0, player.attackAnim - dt * (weapon().style === 'ranged' ? 2.2 : 3.5));
+  player.attackAnim = Math.max(0, player.attackAnim - dt * (ranged() ? 2.2 : 3.5));
 
   // sem regeneração passiva: vida só volta com poção ou bebendo no poço da vila
 
@@ -615,9 +735,11 @@ function update(dt) {
   hero.root.position.copy(player.pos);
   hero.root.rotation.y = player.rotY;
   if (player.dead) hero.root.rotation.z = Math.min(Math.PI / 2, hero.root.rotation.z + dt * 4);
-  const ranged = weapon().style === 'ranged';
-  animateCharacter(hero, t, moveAmount, ranged ? 0 : player.attackAnim, !player.onGround);
-  if (ranged) {
+  const isRanged = ranged();
+  animateCharacter(hero, t, moveAmount, isRanged ? 0 : player.attackAnim, !player.onGround);
+  if (weapon().style === 'magic') { // cajado: aponta para frente ao lançar
+    if (player.attackAnim > 0) hero.armR.rotation.x = -1.5 * Math.min(1, player.attackAnim * 2);
+  } else if (isRanged) {
     if (player.attackAnim > 0) { // pose de tiro: braço do arco esticado, outro puxando a corda
       hero.armL.rotation.x = -1.55;
       hero.armR.rotation.x = -1.35 + (1 - player.attackAnim) * 0.3;
@@ -647,7 +769,7 @@ function update(dt) {
 
   // alvo: anel vermelho = travado, amarelo = mira automática do arco
   if (lockTarget && (!alive(lockTarget) || distXZ(lockTarget.pos, player.pos) > 40)) lockTarget = null;
-  autoTarget = ranged && !player.dead ? findAutoTarget(weapon().range) : null;
+  autoTarget = isRanged && !player.dead ? findAutoTarget(weaponRange(player)) : null;
   const shown = currentTarget();
   ring.visible = !!shown;
   if (shown) {
@@ -663,8 +785,12 @@ function update(dt) {
   marker.position.y = 4.4 + Math.sin(t * 3) * 0.15;
 
   const z = world.zoneAt(player.pos.x, player.pos.z);
-  if (z && z !== currentZone) ui.log(`📍 ${z.name}`, 'info');
+  if (z && z.id !== currentZone?.id) ui.log(`📍 ${z.name}`, 'info');
   currentZone = z;
+  setRegion(regionAt(player.pos.x, player.pos.z));
+  const b = BIOMES[biomeAt(player.pos.x, player.pos.z)];
+  ui.region(region === 'world' ? (z?.name || b.name) : z?.name);
+  if (region === 'world' && b.id !== currentBiome) { if (currentBiome) ui.log(`🧭 ${b.name}`, 'info'); currentBiome = b.id; }
   const safe = world.isSafe(player.pos.x, player.pos.z);
   if (safe !== inSafe) {
     if (inSafe !== null) ui.log(safe ? '🛡️ Zona segura: monstros não entram aqui' : '⚠️ Saindo da zona segura', safe ? 'good' : 'bad');
@@ -676,16 +802,20 @@ function update(dt) {
 
   // câmera segue
   const camTarget = new THREE.Vector3(player.pos.x, player.pos.y + 2.2, player.pos.z);
+  // dentro de casa (sem teto): câmera alta, olhando de cima, para ver o cômodo inteiro
+  const pitch = region === 'home' ? Math.max(cam.pitch, 1.0) : region === 'mine' ? Math.max(cam.pitch, 0.85) : cam.pitch;
   camera.position.set(
-    camTarget.x + cam.dist * Math.cos(cam.pitch) * Math.sin(cam.yaw),
-    camTarget.y + cam.dist * Math.sin(cam.pitch),
-    camTarget.z + cam.dist * Math.cos(cam.pitch) * Math.cos(cam.yaw),
+    camTarget.x + cam.dist * Math.cos(pitch) * Math.sin(cam.yaw),
+    camTarget.y + cam.dist * Math.sin(pitch),
+    camTarget.z + cam.dist * Math.cos(pitch) * Math.cos(cam.yaw),
   );
   camera.position.y = Math.max(0.5, camera.position.y);
+
   camera.lookAt(camTarget);
   world.fadeOccluders(camera.position, player.pos);
   sound.setListener(player.pos, new THREE.Vector3(Math.cos(cam.yaw), 0, -Math.sin(cam.yaw)));
   sun.position.set(player.pos.x + 30, 60, player.pos.z + 20);
+  lantern.position.set(player.pos.x, 4.5, player.pos.z);
   sun.target.position.copy(player.pos);
 
   // HUD
@@ -699,8 +829,12 @@ function update(dt) {
   } else qh = `<h3>${def.title} ✔</h3><p>Volte ao ${elder.name} para a recompensa.</p>`;
   ui.quest(qh);
   ui.hud(player, xpToNext(player.level), weapon());
-  const questTarget = q.status === 'active' ? def.where : (q.status === 'available' || q.status === 'complete') ? elder.pos : null;
-  ui.minimap(player, enemies.alive(), npcs, questTarget, loot.list, remote ? remote.list() : []);
+  ui.skillButton(player, skillReadyAt, player.t);
+  let questTarget = q.status === 'active' ? def.where : (q.status === 'available' || q.status === 'complete') ? elder.pos : null;
+  if (questTarget && region === 'mine' && def?.target === 'goblin_boss') questTarget = MINE_BOSS_ROOM; // dentro da mina a ★ aponta o chefe
+  else if (questTarget && region !== 'world') questTarget = region === 'mine' ? MINE_EXIT : HOME_EXIT; // senão aponta a saída
+  syncTreasures();
+  ui.minimap(player, enemies.alive(), region === 'world' ? npcs : [], questTarget, loot.list, remote ? remote.list() : [], mapMarks());
   ui.updateFloats(camera, dt);
 
   saveTimer += dt;

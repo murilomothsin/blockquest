@@ -125,6 +125,23 @@ export function createCharacter({
     armR.add(sword);
   }
 
+  // Cajado (Arcanista): haste de madeira com um cristal brilhante na ponta. Escondido até equipar.
+  let staff = null;
+  if (weapon) {
+    staff = new THREE.Group();
+    staff.position.set(0, -2 * s, 0.1 * s);
+    const shaft = box(0.16 * s, 0.16 * s, 3.4 * s, 0x6b4423);
+    shaft.position.z = 0.9 * s;
+    const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.38 * s, 0), new THREE.MeshLambertMaterial({ color: 0x7fd0ff, emissive: 0x2a6080 }));
+    orb.position.z = 2.75 * s;
+    orb.castShadow = true;
+    orb.userData.glow = true; // o brilho não é apagado pelo flash de dano
+    staff.add(shaft, orb);
+    staff.userData.orb = orb;
+    staff.visible = false;
+    armR.add(staff);
+  }
+
   let bowMesh = null;
   if (bow) {
     // Arco na mão esquerda: arco de torus no plano YZ do braço, barriga apontando pra frente ao mirar
@@ -143,9 +160,36 @@ export function createCharacter({
   }
 
   const materials = [];
-  root.traverse((o) => { if (o.isMesh && o.material.emissive) materials.push(o.material); });
+  root.traverse((o) => { if (o.isMesh && o.material.emissive && !o.userData.glow) materials.push(o.material); });
 
-  return { root, body, legL, legR, armL, armR, head, sword, bow: bowMesh, gear, materials, height: 5.2 * s };
+  return { root, body, legL, legR, armL, armR, head, sword, staff, bow: bowMesh, gear, materials, height: 5.2 * s };
+}
+
+/**
+ * Mostra a arma certa na mão (espada, adaga, arco ou cajado) com a cor do item.
+ * Adaga = espada com lâmina curta.
+ */
+export function setWeapon(c, it) {
+  if (!it) return;
+  const melee = it.style === 'melee';
+  if (c.sword) {
+    c.sword.visible = melee;
+    c.sword.userData.blade.scale.z = it.sub === 'dagger' ? 0.45 : 1;
+    c.sword.userData.blade.position.z = (it.sub === 'dagger' ? 0.95 : 1.6) * (c.sword.userData.blade.geometry.parameters.depth / 2.4);
+    if (melee) c.sword.userData.blade.material.color.setHex(it.color);
+  }
+  if (c.bow) {
+    c.bow.visible = it.style === 'ranged';
+    if (it.style === 'ranged') c.bow.userData.limb.material.color.setHex(it.color);
+  }
+  if (c.staff) {
+    c.staff.visible = it.style === 'magic';
+    if (it.style === 'magic') {
+      const orb = c.staff.userData.orb.material;
+      orb.color.setHex(it.color);
+      orb.emissive.setHex(it.color).multiplyScalar(0.45);
+    }
+  }
 }
 
 const tmpColor = new THREE.Color();
