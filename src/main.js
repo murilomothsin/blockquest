@@ -486,6 +486,7 @@ function setRegion(r) {
   [scene.fog.near, scene.fog.far] = L.fog;
   hemi.intensity = L.hemi;
   lantern.intensity = L.lantern || 0;
+  lantern.visible = !!L.lantern;
   sun.intensity = L.sun;
   camera.far = L.fog[1] + 40; // nada além da névoa é desenhado (mais FPS)
   camera.updateProjectionMatrix();
@@ -775,6 +776,8 @@ const cam = { yaw: 0, pitch: 0.38, dist: 13, yawSnap: 0 };
 const clock = new THREE.Timer();
 let saveTimer = 0;
 let currentZone = null;
+let currentArea = 'world';
+let miniT = 1;
 let inSafe = null;
 
 function update(dt) {
@@ -932,6 +935,8 @@ function update(dt) {
   if (z && z.id !== currentZone?.id) ui.log(`📍 ${z.name}`, 'info');
   currentZone = z;
   setRegion(regionAt(player.pos.x, player.pos.z));
+  const areaKey = dungeonAt(player.pos.x, player.pos.z)?.id || (region === 'home' ? 'home' : 'world');
+  if (areaKey !== currentArea) { currentArea = areaKey; world.showArea(areaKey); }
   const b = BIOMES[biomeAt(player.pos.x, player.pos.z)];
   ui.region(region === 'world' ? (z?.name || b.name) : z?.name);
   if (region === 'world' && b.id !== currentBiome) { if (currentBiome) ui.log(`🧭 ${b.name}`, 'info'); currentBiome = b.id; }
@@ -984,7 +989,11 @@ function update(dt) {
   // nas dungeons, o minimapa só mostra monstros que você enxerga (mesma sala / sem parede no meio)
   const seen = (e) => !inDungeon || (distXZ(e.pos, player.pos) < 32 && world.los(player.pos.x, player.pos.z, e.pos.x, e.pos.z) && explored.seen(e.pos.x, e.pos.z));
   const sameArea = (o) => dungeonAt(o.pos.x, o.pos.z) === dungeonAt(player.pos.x, player.pos.z);
-  ui.minimap(player, enemies.alive().filter(seen), region === 'world' ? npcs : [], questTarget, loot.list, remote ? remote.list().filter(sameArea) : [], mapMarks());
+  miniT += dt;
+  if (miniT >= 1 / 20) { // minimapa a 20 Hz (desenhar o canvas todo quadro custava ~0,7 ms)
+    miniT = 0;
+    ui.minimap(player, enemies.alive().filter(seen), region === 'world' ? npcs : [], questTarget, loot.list, remote ? remote.list().filter(sameArea) : [], mapMarks());
+  }
   ui.updateFloats(camera, dt);
 
   saveTimer += dt;
@@ -997,11 +1006,18 @@ function update(dt) {
   }
 }
 
+/** tempo de CPU por quadro (ms), média móvel: game.perf no console */
+const perf = { update: 0, render: 0 };
 function frame(now) {
   clock.update(now);
   const dt = Math.min(0.05, clock.getDelta());
+  const t0 = performance.now();
   update(dt);
+  const t1 = performance.now();
   renderer.render(scene, camera);
+  const t2 = performance.now();
+  perf.update += (t1 - t0 - perf.update) * 0.05;
+  perf.render += (t2 - t1 - perf.render) * 0.05;
   input.endFrame();
   requestAnimationFrame(frame);
 }
@@ -1010,4 +1026,4 @@ ui.log('Bem-vindo a BlockQuest! Fale com o Ancião Bento.', 'info');
 frame();
 
 // atalho de debug no console
-window.game = { player, cam, enemies, loot, ui, equip, unequip, defense, onPlayerHit, addItem, request, applyFx, localLoot, projectiles, world, sound, session, get net() { return net; }, get remote() { return remote; }, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };
+window.game = { player, cam, renderer, scene, camera, perf, enemies, loot, ui, equip, unequip, defense, onPlayerHit, addItem, request, applyFx, localLoot, projectiles, world, sound, session, get net() { return net; }, get remote() { return remote; }, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };

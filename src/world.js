@@ -1,6 +1,7 @@
 // Desenha o mapa (three.js) a partir do layout compartilhado em shared/worldData.js:
 // superfície com biomas, entrada e interior da mina, interior da casa e baús de tesouro.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { mulberry32 } from './shared/rng.js';
 import {
   WORLD_RADIUS, SAFE_ZONE, SAFE_ZONES, WOODS, ZONES, PATHS, HOUSES, LAKE, BIOMES, biomeBlend, buildLayout, createWorldQueries,
@@ -10,7 +11,14 @@ import {
 
 export { WORLD_RADIUS, SAFE_ZONE, WOODS, ZONES };
 
-const mat = (color) => new THREE.MeshLambertMaterial({ color });
+// materiais compartilhados por cor (antes: 1 material por objeto = ~6 mil materiais)
+const matCache = new Map();
+const mat = (color) => {
+  if (!matCache.has(color)) matCache.set(color, new THREE.MeshLambertMaterial({ color }));
+  return matCache.get(color);
+};
+/** marca objetos que mudam depois de criados (animação, fade): ficam fora da junção estática */
+const dyn = (o) => { o.userData.dyn = true; return o; };
 function mesh(geo, color, x = 0, y = 0, z = 0) {
   const m = new THREE.Mesh(geo, mat(color));
   m.position.set(x, y, z);
@@ -62,13 +70,14 @@ function treasureChest(tier) {
 }
 
 export function buildWorld(scene) {
+  const firstChild = scene.children.length;
   const layout = buildLayout();
   const q = createWorldQueries(layout);
   const animated = [];
   const R = WORLD_RADIUS + 80;
 
   // ---------- Chão com as cores dos biomas (vértices coloridos) ----------
-  const groundGeo = new THREE.PlaneGeometry(R * 2, R * 2, 220, 220);
+  const groundGeo = new THREE.PlaneGeometry(R * 2, R * 2, 190, 190);
   groundGeo.rotateX(-Math.PI / 2);
   const colors = [];
   const base = new THREE.Color(BIOMES.grass.ground), c2 = new THREE.Color(), out = new THREE.Color();
@@ -83,7 +92,7 @@ export function buildWorld(scene) {
     colors.push(out.r, out.g, out.b);
   }
   groundGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  const ground = new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  const ground = dyn(new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({ vertexColors: true })));
   ground.receiveShadow = true;
   scene.add(ground);
 
@@ -150,6 +159,7 @@ export function buildWorld(scene) {
   const pineGeo = new THREE.ConeGeometry(2, 4.5, 6);
   const snowGeo = new THREE.ConeGeometry(1.05, 1.3, 6);
   const trees = [];
+  const deadTrunkGeo = new THREE.BoxGeometry(0.7, 4.2, 0.7);
   for (const tr of layout.trees) {
     const t = new THREE.Group();
     t.add(mesh(trunkGeo, 0x7a4e2a, 0, 1.5, 0));
@@ -159,7 +169,6 @@ export function buildWorld(scene) {
     }
     else t.add(mesh(leafGeo, tr.leaf, 0, 4.2, 0));
     t.position.set(tr.x, 0, tr.z); t.scale.setScalar(tr.s); t.rotation.y = tr.rot;
-    scene.add(t);
     trees.push({ x: tr.x, z: tr.z, group: t, faded: false });
   }
   // Pântano: árvores mortas (tronco escuro e galhos tortos)
@@ -167,16 +176,16 @@ export function buildWorld(scene) {
   for (const tr of layout.deadTrees) {
     const t = new THREE.Group();
     const bark = tr.cursed ? 0x2b2530 : 0x3b3128;
-    t.add(mesh(new THREE.BoxGeometry(0.7, 4.2, 0.7), bark, 0, 2.1, 0));
+    t.add(mesh(deadTrunkGeo, bark, 0, 2.1, 0));
     for (const [y, rz, ry] of [[3.2, 0.9, 0], [2.6, -0.8, 1.6], [3.8, 0.6, 3.1]]) {
       const b = mesh(branchGeo, bark, 0, y, 0);
       b.rotation.set(0, ry, rz); b.position.x = Math.cos(ry) * 0.6; b.position.z = -Math.sin(ry) * 0.6;
       t.add(b);
     }
     t.position.set(tr.x, 0, tr.z); t.scale.setScalar(tr.s); t.rotation.y = tr.rot;
-    scene.add(t);
     trees.push({ x: tr.x, z: tr.z, group: t, faded: false });
   }
+  const treeInst = instanceTrees(scene, trees);
 
   // Pedras (cor do bioma; na pedreira algumas têm minério brilhando)
   for (const r of layout.rocks) {
@@ -230,7 +239,7 @@ export function buildWorld(scene) {
     const l = mesh(new THREE.BoxGeometry(1.6, 0.3, 0.3), 0x5a3a1a, 0, 0.15, 0);
     l.rotation.y = (i / 5) * Math.PI; fire.add(l);
   }
-  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.5, 6), new THREE.MeshBasicMaterial({ color: 0xff8c1a }));
+  const flame = dyn(new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.5, 6), new THREE.MeshBasicMaterial({ color: 0xff8c1a })));
   flame.position.y = 0.9; fire.add(flame);
   const fireLight = new THREE.PointLight(0xff8c1a, 30, 18);
   fireLight.position.y = 2; fire.add(fireLight);
@@ -309,7 +318,7 @@ export function buildWorld(scene) {
   // Nuvens (só visual)
   const crand = mulberry32(99);
   for (let i = 0; i < 30; i++) {
-    const c = new THREE.Mesh(new THREE.BoxGeometry(8 + crand() * 10, 2, 5 + crand() * 6), new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 }));
+    const c = dyn(new THREE.Mesh(new THREE.BoxGeometry(8 + crand() * 10, 2, 5 + crand() * 6), new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 })));
     c.position.set((crand() - 0.5) * 380, 40 + crand() * 15, (crand() - 0.5) * 380);
     scene.add(c);
     const sp = 1 + crand() * 2;
@@ -341,6 +350,7 @@ export function buildWorld(scene) {
   // ---------- Baús de tesouro ----------
   const treasures = TREASURES.map((t) => {
     const c = treasureChest(t.tier);
+    dyn(c.group);
     c.group.position.set(t.x, 0, t.z);
     c.group.rotation.y = Math.atan2(-t.x, -t.z) * (dungeonAt(t.x, t.z) ? 0 : 1); // na superfície olha para a vila
     scene.add(c.group);
@@ -368,18 +378,23 @@ export function buildWorld(scene) {
       if (block !== t.faded) setFade(t, block);
     }
   }
+  /** árvore na frente da câmera: some da InstancedMesh e aparece uma cópia transparente no lugar */
   function setFade(t, on) {
     t.faded = on;
-    t.group.traverse((o) => {
-      if (!o.isMesh) return;
-      o.material.transparent = on;
-      o.material.opacity = on ? 0.22 : 1;
-      o.material.depthWrite = !on;
-    });
+    if (on && !t.ghost) {
+      t.ghost = t.group;
+      t.ghost.traverse((o) => { if (o.isMesh) { o.material = fadedMat(o.material.color.getHex()); o.castShadow = false; } });
+    }
+    treeInst.show(t, !on);
+    if (on) scene.add(t.ghost); else scene.remove(t.ghost);
   }
+  const areas = groupByArea(scene, firstChild);
+  for (const g of Object.values(areas)) batchStatic(g);
 
   return {
     ...q, trees, treasures, furniture, fadeOccluders, dungeons,
+    /** só a área em que o jogador está fica na cena: 'world' | 'home' | id da dungeon (mine, tower1..4) */
+    showArea: (key) => { for (const [k, g] of Object.entries(areas)) g.visible = k === key; },
     /** abaixa as paredes da dungeon que ficam entre a câmera e o jogador (técnica de "cutaway") */
     cutaway: (cam, player, dt) => {
       const d = dungeonAt(player.x, player.z);
@@ -388,6 +403,122 @@ export function buildWorld(scene) {
     updateLights: (player, t) => lights(player, t),
     update: (t, dt) => animated.forEach((f) => f(t, dt)),
   };
+}
+
+
+// ---------- Otimização da cena ----------
+const fadedCache = new Map();
+/** versão transparente (compartilhada) de uma cor, para a árvore "fantasma" */
+function fadedMat(color) {
+  if (!fadedCache.has(color)) fadedCache.set(color, new THREE.MeshLambertMaterial({ color, transparent: true, opacity: 0.22, depthWrite: false }));
+  return fadedCache.get(color);
+}
+
+/**
+ * Árvores viram InstancedMesh: 1 draw call por tipo de peça (tronco, copa, pinheiro, neve, galho...)
+ * em vez de ~2 mil objetos. Cada árvore guarda os índices das suas peças para poder sumir (fade).
+ */
+function instanceTrees(scene, trees) {
+  const byGeo = new Map();
+  const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  for (const t of trees) {
+    t.group.updateMatrixWorld(true);
+    t.parts = [];
+    t.group.traverse((o) => {
+      if (!o.isMesh) return;
+      if (!byGeo.has(o.geometry)) byGeo.set(o.geometry, []);
+      const list = byGeo.get(o.geometry);
+      t.parts.push([o.geometry, list.length]);
+      list.push({ m: o.matrixWorld.clone(), c: o.material.color, cast: o.castShadow });
+    });
+  }
+  const meshes = new Map();
+  const white = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  for (const [geo, list] of byGeo) {
+    const im = new THREE.InstancedMesh(geo, white, list.length);
+    list.forEach((it, i) => { im.setMatrixAt(i, it.m); im.setColorAt(i, it.c); });
+    im.castShadow = list[0].cast; im.receiveShadow = true;
+    im.computeBoundingSphere();
+    scene.add(im);
+    meshes.set(geo, { im, list });
+  }
+  return {
+    show(t, on) {
+      for (const [geo, i] of t.parts) {
+        const { im, list } = meshes.get(geo);
+        im.setMatrixAt(i, on ? list[i].m : zero);
+        im.instanceMatrix.needsUpdate = true;
+      }
+    },
+  };
+}
+
+/**
+ * Separa o que foi criado em grupos por área (superfície, casa, cada dungeon/andar).
+ * Só a área atual fica visível: a cena não percorre nem desenha o resto.
+ */
+function groupByArea(scene, first) {
+  const areas = { world: new THREE.Group(), home: new THREE.Group() };
+  for (const d of DUNGEONS) areas[d.id] = new THREE.Group();
+  const items = scene.children.slice(first).filter((o) => !o.isLight);
+  for (const o of items) {
+    if (o.userData.area) { areas[o.userData.area].add(o); continue; }
+    const d = dungeonAt(o.position.x, o.position.z);
+    const inHouse = o.position.x >= HOME.x0 - 2 && o.position.x <= HOME.x0 + HOME.w + 2 && o.position.z >= HOME.z0 - 2 && o.position.z <= HOME.z0 + HOME.d + 2;
+    (d ? areas[d.id] : inHouse ? areas.home : areas.world).add(o);
+  }
+  for (const [k, g] of Object.entries(areas)) { g.name = `area:${k}`; g.visible = k === 'world'; scene.add(g); }
+  return areas;
+}
+
+/**
+ * Junta tudo o que é estático (não animado, opaco, sem textura) em poucas malhas por pedaço do mapa (48 m),
+ * usando cor por vértice. Milhares de objetos → algumas centenas, e cada pedaço ainda é cortado pela câmera.
+ */
+const CHUNK = 48;
+const batchMats = new Map();
+function batchMat(type, side) {
+  const k = `${type}${side}`;
+  if (!batchMats.has(k)) batchMats.set(k, type === 'b' ? new THREE.MeshBasicMaterial({ vertexColors: true, side }) : new THREE.MeshLambertMaterial({ vertexColors: true, side }));
+  return batchMats.get(k);
+}
+function batchStatic(root) {
+  root.updateMatrixWorld(true);
+  const buckets = new Map(), done = [], wp = new THREE.Vector3();
+  root.traverse((o) => {
+    if (!o.isMesh || o.isInstancedMesh || !o.visible) return;
+    for (let p = o; p && p !== root; p = p.parent) if (p.userData.dyn) return;
+    const m = o.material;
+    if (Array.isArray(m) || m.transparent || m.map || m.vertexColors || !(m.isMeshLambertMaterial || m.isMeshBasicMaterial)) return;
+    if (m.isMeshLambertMaterial && m.emissive.getHex() !== 0) return;
+    wp.setFromMatrixPosition(o.matrixWorld);
+    const type = m.isMeshBasicMaterial ? 'b' : 'l';
+    const key = `${Math.floor(wp.x / CHUNK)}|${Math.floor(wp.z / CHUNK)}|${type}|${o.castShadow ? 1 : 0}|${o.receiveShadow ? 1 : 0}|${m.side}`;
+    const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
+    g.morphAttributes = {};
+    g.applyMatrix4(o.matrixWorld);
+    const n = g.attributes.position.count, col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { col[i * 3] = m.color.r; col[i * 3 + 1] = m.color.g; col[i * 3 + 2] = m.color.b; }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(g);
+    done.push(o);
+  });
+  for (const o of done) o.parent.remove(o);
+  // grupos que ficaram vazios
+  const prune = (o) => { for (const c of [...o.children]) prune(c); if (o !== root && o.type === 'Group' && !o.children.length) o.parent?.remove(o); };
+  prune(root);
+  for (const [key, geos] of buckets) {
+    const [, , type, cast, recv, side] = key.split('|');
+    const merged = mergeGeometries(geos);
+    geos.forEach((g) => g.dispose());
+    const mm = new THREE.Mesh(merged, batchMat(type, +side));
+    mm.castShadow = cast === '1'; mm.receiveShadow = recv === '1';
+    mm.matrixAutoUpdate = false;
+    root.add(mm);
+  }
+  return done.length;
 }
 
 // ---------- Dungeons em grade (mina e andares da torre) ----------
@@ -424,6 +555,7 @@ function buildDungeon(scene, d, deco, animated) {
     wallMesh.setColorAt(i, col.setHex(tower ? 0x6a6380 : 0x5b544b).offsetHSL(0, 0, (rnd() - 0.5) * 0.08));
   });
   wallMesh.castShadow = true; wallMesh.receiveShadow = true;
+  wallMesh.userData.area = d.id; // fica na origem (as instâncias é que têm posição): diz a área na mão
   scene.add(wallMesh);
 
   if (tower) { // tapete vermelho e círculo mágico no chão
@@ -431,7 +563,7 @@ function buildDungeon(scene, d, deco, animated) {
     const rug = new THREE.Mesh(new THREE.PlaneGeometry(4, 30), mat(0x6b1f2f));
     rug.rotation.x = -Math.PI / 2; rug.position.set(c.x, 0.03, c.z + 18);
     if (d.floor !== 3) scene.add(rug);
-    const circle = new THREE.Mesh(new THREE.RingGeometry(5, 5.6, 48), new THREE.MeshBasicMaterial({ color: d.floor === 4 ? 0x5cff7a : 0x9b5cff, transparent: true, opacity: 0.55, depthWrite: false }));
+    const circle = dyn(new THREE.Mesh(new THREE.RingGeometry(5, 5.6, 48), new THREE.MeshBasicMaterial({ color: d.floor === 4 ? 0x5cff7a : 0x9b5cff, transparent: true, opacity: 0.55, depthWrite: false })));
     circle.rotation.x = -Math.PI / 2; circle.position.set(c.x, 0.04, c.z - (d.floor === 4 ? 4 : 0));
     if (d.floor === 4 || d.floor === 2) scene.add(circle);
     animated.push((t) => { circle.rotation.z = t * 0.3; });
@@ -459,7 +591,7 @@ function buildDungeon(scene, d, deco, animated) {
   deco.torches.forEach((t, i) => {
     const x = t.x + t.dx * 0.15, z = t.z + t.dz * 0.15;
     scene.add(mesh(new THREE.BoxGeometry(0.14, 0.7, 0.14), 0x5a3a1a, x, 1.9, z));
-    const fl = glow(new THREE.ConeGeometry(0.16, 0.42, 5), tower ? 0xb46bff : 0xffa63a, x, 2.45, z);
+    const fl = dyn(glow(new THREE.ConeGeometry(0.16, 0.42, 5), tower ? 0xb46bff : 0xffa63a, x, 2.45, z));
     scene.add(fl);
     torches.push({ x: x + t.dx * 0.6, z: z + t.dz * 0.6 });
     animated.push((tt) => { fl.scale.y = 1 + Math.sin(tt * 15 + i) * 0.2; });
@@ -564,6 +696,9 @@ function makeLightPool(scene, dungeons) {
     const g = d && dungeons.find((x) => x.d === d);
     const list = g ? [...g.torches].sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z)) : [];
     pool.forEach((l, i) => {
+      // fora das dungeons as luzes saem da cena: luz com intensidade 0 ainda custa no shader de todo pixel.
+      // (só muda ao trocar de área, então o three.js recompila os shaders uma vez, no teleporte)
+      l.visible = !!g;
       const tc = list[i];
       if (!tc) { l.intensity = 0; return; }
       l.position.set(tc.x, 2.6, tc.z);
@@ -595,7 +730,7 @@ function buildCastle(scene, layout, animated) {
     scene.add(mesh(new THREE.CylinderGeometry(t.r, t.r * 1.1, t.h, 10), stone, t.x, t.h / 2, t.z));
     const roof = mesh(new THREE.ConeGeometry(t.r * 1.25, 5, 10), 0x3b5fb5, t.x, t.h + 2.5, t.z);
     scene.add(roof);
-    const flag = mesh(new THREE.BoxGeometry(0.08, 1, 1.6), 0xd9433b, t.x, t.h + 5.6, t.z + 0.8);
+    const flag = dyn(mesh(new THREE.BoxGeometry(0.08, 1, 1.6), 0xd9433b, t.x, t.h + 5.6, t.z + 0.8));
     scene.add(flag);
     scene.add(mesh(new THREE.BoxGeometry(0.12, 2.6, 0.12), 0x5a3a1a, t.x, t.h + 5, t.z));
     animated.push((tt) => { flag.rotation.y = Math.sin(tt * 2 + t.x) * 0.3; });
@@ -623,7 +758,7 @@ function buildCastle(scene, layout, animated) {
   tent.add(mesh(new THREE.BoxGeometry(4.4, 0.25, 3), 0x4a2a8a, 0, 3.4, 0));
   for (const [x, z] of [[-2, -1.3], [2, -1.3], [-2, 1.3], [2, 1.3]]) tent.add(mesh(new THREE.BoxGeometry(0.18, 3.4, 0.18), 0x5a3a1a, x, 1.7, z));
   tent.add(mesh(new THREE.BoxGeometry(2.6, 0.9, 1), 0x6b4423, 0, 0.45, 1.6));
-  const ball = glow(new THREE.SphereGeometry(0.28, 12, 10), 0x9fd8ff, -0.6, 1.2, 1.6);
+  const ball = dyn(glow(new THREE.SphereGeometry(0.28, 12, 10), 0x9fd8ff, -0.6, 1.2, 1.6));
   tent.add(ball);
   for (let i = 0; i < 3; i++) tent.add(mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.5, 6), 0xe8d9a8, 0.3 + i * 0.3, 1.0, 1.6).rotateZ(Math.PI / 2));
   animated.push((t) => { ball.position.y = 1.2 + Math.sin(t * 2) * 0.05; });
@@ -636,7 +771,7 @@ function buildCastle(scene, layout, animated) {
   const water = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.1, 0.82, 16), new THREE.MeshLambertMaterial({ color: 0x3a8fd9, emissive: 0x0a2a4a }));
   water.position.y = 0.42; fount.add(water);
   fount.add(mesh(new THREE.CylinderGeometry(0.35, 0.45, 2.2, 8), 0x9d9788, 0, 1.5, 0));
-  const jet = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.2, 8), new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.7 }));
+  const jet = dyn(new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.2, 8), new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.7 })));
   jet.position.y = 3; fount.add(jet);
   animated.push((t) => { jet.scale.y = 1 + Math.sin(t * 8) * 0.15; });
   fount.position.set(F.x, 0, F.z);
@@ -680,7 +815,7 @@ function buildCursed(scene, layout, animated) {
   // fogos-fátuos
   const wispGeo = new THREE.SphereGeometry(0.22, 8, 6);
   for (const w of R.wisps) {
-    const m = glow(wispGeo, 0x9fe0ff, w.x, 1.5, w.z);
+    const m = dyn(glow(wispGeo, 0x9fe0ff, w.x, 1.5, w.z));
     scene.add(m);
     animated.push((t) => { m.position.set(w.x + Math.sin(t * 0.7 + w.ph) * 3, 1.3 + Math.sin(t * 2 + w.ph) * 0.5, w.z + Math.cos(t * 0.5 + w.ph) * 3); });
   }
@@ -703,7 +838,7 @@ function buildTowerOutside(scene, animated) {
     const a = k * 1.3 + 0.5;
     g.add(glow(new THREE.BoxGeometry(1.2, 2.2, 0.4), 0xb46bff, Math.cos(a) * T.r * 0.93, 9 + k * 9, Math.sin(a) * T.r * 0.93).rotateY(-a + Math.PI / 2));
   }
-  const orb = glow(new THREE.IcosahedronGeometry(1.4, 0), 0x5cff7a, 0, 57, 0);
+  const orb = dyn(glow(new THREE.IcosahedronGeometry(1.4, 0), 0x5cff7a, 0, 57, 0));
   g.add(orb);
   animated.push((t) => { orb.rotation.y = t; orb.position.y = 57 + Math.sin(t * 1.5) * 0.6; });
   g.position.set(T.x, 0, T.z);

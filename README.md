@@ -212,6 +212,15 @@ Ao morrer você **perde tudo o que carrega** (volta com uma Espada de Madeira) e
 ### Balanceamento
 `node scripts/balance.mjs` simula, com as mesmas regras do jogo, dano por segundo de cada classe por nível, tempo para matar cada monstro, vida perdida em cada sala da mina e andar da torre, economia e custo da morte. Progressão típica: goblins no Nv3, Golem no Nv5, mina no **Nv8**, lobos no Nv9, fantasmas no Nv11, Rainha no Nv12, torre no **Nv14**.
 
+## Desempenho
+
+- **Só a área atual é desenhada:** o mapa é dividido em superfície, casa e cada dungeon/andar. Quem está na mina não percorre nem desenha a superfície (e vice-versa).
+- **Monstros:** só existe modelo 3D para monstro a até 110 m e na mesma área. Online o servidor já manda só esses (`VIEW` em `server/game.js`); offline o cliente faz o mesmo corte.
+- **Objetos fixos juntados:** tudo o que não se mexe (casas, pedras, cactos, muralhas, lápides...) vira poucas malhas por pedaço de 48 m, com cor por vértice; as árvores são `InstancedMesh` (a que tampa a câmera vira uma cópia transparente). Materiais e geometrias compartilhados.
+- **Luzes de tocha** só existem dentro das dungeons; o minimapa redesenha a 20 Hz.
+- **Rede:** cada jogador recebe a posição só de quem está a até 120 m e na mesma área.
+- Medir no navegador: `game.perf` (ms de CPU por quadro: update e render) e `game.renderer.info.render.calls`. Servidor: `node scripts/bench-server.mjs [jogadores] [ticks]`.
+
 ## Sons
 
 Todos os sons são sintetizados com Web Audio (`src/audio.js`), com volume e pan pela posição. Para usar arquivos de verdade, coloque os áudios em `public/sounds/` e mapeie em `public/sounds/sounds.json`, por exemplo `{ "swing": "espada.mp3" }`. A lista de nomes está no próprio json.
@@ -233,6 +242,7 @@ scripts/
   denuncias.js   lista/resolve denúncias (npm run denuncias)
   test-*.mjs     testes do servidor: test-server (economia/cargos), test-chat, test-mina (classes, casa, mina, baús, morte), test-expansao (torre, pergaminhos, castelo)
   balance.mjs    análise de balanceamento (números)
+  bench-server.mjs  custo do tick do servidor com N jogadores
 src/
   shared/        código usado pelo navegador E pelo servidor:
     progress.js    regras do personagem: XP, ouro, loja, equipar, poções, missões, baús, casa, portas, classe, morte

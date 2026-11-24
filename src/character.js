@@ -1,7 +1,15 @@
 import * as THREE from 'three';
 
+// geometrias compartilhadas por tamanho (cada personagem/monstro criava ~20 caixas novas na GPU)
+const boxGeos = new Map();
+function boxGeo(w, h, d) {
+  const k = `${w.toFixed(3)},${h.toFixed(3)},${d.toFixed(3)}`;
+  if (!boxGeos.has(k)) boxGeos.set(k, new THREE.BoxGeometry(w, h, d));
+  return boxGeos.get(k);
+}
 function box(w, h, d, color) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
+  // material continua por personagem: o flash de dano e as cores do equipamento mudam o material
+  const m = new THREE.Mesh(boxGeo(w, h, d), new THREE.MeshLambertMaterial({ color }));
   m.castShadow = true;
   m.receiveShadow = true;
   return m;

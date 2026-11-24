@@ -23,7 +23,8 @@ export function createGame({ players, send }) {
   const world = createWorldQueries(buildLayout());
   const sim = new MobSim(world, { emit: route });
   const nowS = () => Date.now() / 1000;
-  const inView = (p, x, z, r = VIEW) => p.state && Math.hypot(p.state.x - x, p.state.z - z) < r;
+  // perto E na mesma área (andares da torre ficam a ~110 m um do outro: sem isso vinham monstros do andar de cima)
+  const inView = (p, x, z, r = VIEW) => p.state && Math.hypot(p.state.x - x, p.state.z - z) < r && dungeonAt(x, z) === dungeonAt(p.state.x, p.state.z);
 
   /** manda o personagem atualizado + efeitos para o jogador */
   function pushFx(p, fx) {
@@ -77,8 +78,12 @@ export function createGame({ players, send }) {
     }
   }, TICK_MS);
 
+  /** salvar nunca derruba o servidor (ex.: conta apagada com o jogador online → FOREIGN KEY) */
+  function safeSave(p) {
+    try { saveCharacter(p.id, p.c); return true; } catch (e) { console.error(`[save] falhou para ${p.name || p.id}: ${e.message}`); return false; }
+  }
   function saveAll(force = false) {
-    for (const p of players.values()) if (p.dirty || force) { saveCharacter(p.id, p.c); p.dirty = false; }
+    for (const p of players.values()) if (p.dirty || force) { if (safeSave(p)) p.dirty = false; }
   }
 
   /** Jogador entrou (ou reconectou): começa onde parou o personagem. Retorna os baús ainda abertos. */
@@ -91,7 +96,7 @@ export function createGame({ players, send }) {
     return p.loot.list().map((l) => ({ k: 'loot', lid: l.lid, item: l.item, n: l.n, x: l.x, z: l.z }));
   }
 
-  function leave(p) { saveCharacter(p.id, p.c); }
+  function leave(p) { safeSave(p); }
 
   /** Posição vinda do cliente: recusa velocidade impossível (teleporte/speed hack) */
   function handleState(p, s) {

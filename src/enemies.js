@@ -3,6 +3,9 @@
 import * as THREE from 'three';
 import { createCharacter, animateCharacter, flash, setWeapon } from './character.js';
 import { ITEMS } from './items.js';
+import { dungeonAt } from './shared/worldData.js';
+
+const VIEW_R = 110; // mesmo raio que o servidor usa para mandar monstros
 import { makeLabel } from './world.js';
 import { MobSim, TYPES, TYPE_IDS, STATES, WILD, inArc } from './shared/mobs.js';
 import { playerAttack, playerSkill } from './shared/combatRules.js';
@@ -358,7 +361,8 @@ export class EnemyManager {
 
   // ---------- Eventos (da MobSim local ou do servidor) ----------
   onEvent(ev) {
-    const v = ev.id != null && ev.e !== 'rock' && ev.e !== 'impact' ? this.view(ev.id) : null;
+    const v = ev.id == null || ev.e === 'rock' || ev.e === 'impact' ? null
+      : this.views.get(ev.id) || (this.isNear(ev.x, ev.z) ? this.view(ev.id) : null);
     const at = new THREE.Vector3(ev.x ?? v?.pos.x ?? 0, 0, ev.z ?? v?.pos.z ?? 0);
     switch (ev.e) {
       case 'aggro': if (v) this.sfx(`${v.type}Aggro`, at); break;
@@ -442,10 +446,20 @@ export class EnemyManager {
   }
 
   // ---------- Loop ----------
+  /** offline: só existe modelo 3D para monstro perto do jogador e na mesma área (igual ao online, que o servidor já corta) */
+  isNear(x, z) {
+    const p = this.playerPos;
+    if (!p || x == null) return true;
+    return Math.abs(x - p.x) < VIEW_R && Math.abs(z - p.z) < VIEW_R && Math.hypot(x - p.x, z - p.z) < VIEW_R && dungeonAt(x, z) === dungeonAt(p.x, p.z);
+  }
+
   update(dt, player, camera) {
+    this.playerPos = player.pos;
     if (!this.online) {
       this.sim.update(dt, [{ id: this.myId, x: player.pos.x, z: player.pos.z, dead: player.dead }]);
       for (const m of this.sim.mobs) {
+        if (!this.isNear(m.x, m.z)) { if (this.views.has(m.id)) this.removeView(m.id); continue; }
+        if (m.state === 'dead' && !this.views.has(m.id)) continue;
         const v = this.view(m.id);
         if (!v) continue;
         if (m.state !== 'dead') {

@@ -1,5 +1,6 @@
 // Servidor do BlockQuest: API de contas (HTTP) + mundo compartilhado (WebSocket) + arquivos do jogo (dist/)
 import http from 'node:http';
+import { dungeonAt } from '../src/shared/worldData.js';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -134,6 +135,9 @@ wss.on('connection', (ws) => {
   let me = null;
 
   ws.on('message', (raw) => {
+    try { onMessage(raw); } catch (e) { console.error(`[ws] erro tratando mensagem de ${me?.name || '?'}:`, e); }
+  });
+  const onMessage = (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
     if (!msg || typeof msg.t !== 'string') return;
@@ -205,11 +209,11 @@ wss.on('connection', (ws) => {
       }
       default: break; // 'save' do cliente não existe mais: o progresso é do servidor
     }
-  });
+  };
 
   ws.on('close', () => {
     if (me && players.get(me.id)?.ws === ws) {
-      game.leave(me);
+      try { game.leave(me); } catch (e) { console.error('[ws] erro ao sair:', e); }
       players.delete(me.id);
       broadcast({ t: 'leave', id: me.id, name: me.name });
       console.log(`[-] ${me.name} saiu (${players.size} online)`);
@@ -219,12 +223,28 @@ wss.on('connection', (ws) => {
 
 // snapshot com a posição de todo mundo. Quem está dentro de casa some para os outros (e não vê ninguém):
 // a casa é um interior privado, todo mundo usa o mesmo lugar do mapa mas cada um só vê a si mesmo.
+// Cada um recebe só quem está perto (até SNAP_VIEW m e na mesma dungeon/andar): antes todo mundo recebia
+// todo mundo, 10x por segundo (com 100 jogadores = ~30 MB/s de saída). O cliente esconde quem parou de chegar.
+const SNAP_VIEW = 120;
 setInterval(() => {
   if (players.size < 2) return;
   const list = [];
-  for (const p of players.values()) if (p.state && p.region !== 'home') list.push({ id: p.id, ...p.state });
-  const data = JSON.stringify({ t: 'snap', players: list });
-  for (const p of players.values()) if (p.region !== 'home' && p.ws.readyState === 1) p.ws.send(data);
+  for (const p of players.values()) {
+    if (!p.state || p.region === 'home') continue;
+    list.push({ p, area: dungeonAt(p.state.x, p.state.z)?.id || 'world', msg: { id: p.id, ...p.state } });
+  }
+  for (const me of list) {
+    if (me.p.ws.readyState !== 1) continue;
+    const near = [];
+    for (const o of list) {
+      if (o === me || o.area !== me.area) continue;
+      const dx = o.p.state.x - me.p.state.x, dz = o.p.state.z - me.p.state.z;
+      if (dx * dx + dz * dz < SNAP_VIEW * SNAP_VIEW) near.push(o.msg);
+    }
+    if (!near.length && me.p.emptySnap) continue; // ninguém por perto: manda a lista vazia uma vez só
+    me.p.emptySnap = !near.length;
+    me.p.ws.send(JSON.stringify({ t: 'snap', players: near }));
+  }
 }, TICK_MS);
 
 // derruba conexões mortas e limpa sessões vencidas
