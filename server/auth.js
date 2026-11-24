@@ -1,8 +1,10 @@
-// Contas, sessões e saves
+// Contas, sessões, suspensões e saves
 import { randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { q } from './db.js';
 import { badName } from './filter.js';
+import { ROLES } from '../src/shared/roles.js';
+import { normalizeCharacter, publicCharacter } from '../src/shared/progress.js';
 
 const scrypt = promisify(scryptCb);
 const SESSION_DAYS = 30;
@@ -26,13 +28,24 @@ function validate(username, password) {
   }
 }
 
+const roleOk = (r) => (ROLES[r] ? r : 'player');
+const toUser = (row) => ({ id: row.id, username: row.username, role: roleOk(row.role) });
+
+/** Mensagem de suspensão, ou null se a conta está liberada */
+export function banMessage(row, now = Date.now()) {
+  if (!row?.banned_until || row.banned_until <= now) return null;
+  const perm = row.banned_until >= 8e15;
+  const until = perm ? 'permanentemente' : `até ${new Date(row.banned_until).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`;
+  return `Conta suspensa ${until}.${row.ban_reason ? ` Motivo: ${row.ban_reason}` : ''}`;
+}
+
 export async function register(username, password) {
   validate(username, password);
   if (badName(username)) throw new HttpError(400, 'Esse nome não é permitido. Escolha outro.');
   if (q.userByName.get(username)) throw new HttpError(409, 'Esse nome de usuário já existe.');
   const { hash, salt } = await hashPassword(password);
   const { lastInsertRowid } = q.insertUser.run(username, hash, salt, Date.now());
-  return { id: Number(lastInsertRowid), username };
+  return { id: Number(lastInsertRowid), username, role: 'player' };
 }
 
 export async function login(username, password) {
@@ -42,8 +55,10 @@ export async function login(username, password) {
   const { hash } = await hashPassword(password, u?.salt ?? 'x'.repeat(32));
   const ok = u && timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(u.pass_hash, 'hex'));
   if (!ok) throw new HttpError(401, 'Usuário ou senha incorretos.');
+  const ban = banMessage(u);
+  if (ban) throw new HttpError(403, ban);
   q.touchLogin.run(Date.now(), u.id);
-  return { id: u.id, username: u.username };
+  return toUser(u);
 }
 
 export function createSession(userId) {
@@ -52,58 +67,24 @@ export function createSession(userId) {
   return token;
 }
 
+/** Usuário da sessão ({id, username, role, ban}) ou null. `ban` = mensagem se suspenso. */
 export function userFromToken(token) {
   if (typeof token !== 'string' || token.length > 100) return null;
   const row = q.sessionUser.get(token, Date.now());
-  return row ? { id: row.id, username: row.username } : null;
+  return row ? { ...toUser(row), ban: banMessage(row) } : null;
 }
 
 export function logout(token) { if (typeof token === 'string') q.deleteSession.run(token); }
 export function purgeExpiredSessions() { q.purgeSessions.run(Date.now()); }
 
-// ---------- Saves ----------
-const int = (v, min, max, def) => (Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : def);
-const num = (v, min, max, def) => (Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : def);
-const ID_RE = /^[a-z0-9_]{1,32}$/;
-
-/** Aceita só os campos conhecidos, com tipos e limites. (Não é anti-cheat: o cliente ainda manda o progresso.) */
-export function sanitizeSave(d) {
-  if (!d || typeof d !== 'object') return null;
-  const inv = {};
-  if (d.inv && typeof d.inv === 'object') {
-    for (const [k, v] of Object.entries(d.inv).slice(0, 60)) if (ID_RE.test(k)) { const n = int(v, 0, 9999, 0); if (n > 0) inv[k] = n; }
-  }
-  const quest = d.quest && typeof d.quest === 'object' ? {
-    idx: int(d.quest.idx, 0, 100, 0),
-    status: ['available', 'active', 'complete', 'done'].includes(d.quest.status) ? d.quest.status : 'available',
-    progress: int(d.quest.progress, 0, 1000, 0),
-  } : undefined;
-  const maxHp = int(d.maxHp, 1, 100000, 100);
-  return {
-    level: int(d.level, 1, 999, 1),
-    xp: int(d.xp, 0, 1e9, 0),
-    gold: int(d.gold, 0, 1e9, 0),
-    maxHp,
-    hp: int(d.hp, 0, maxHp, maxHp),
-    kills: int(d.kills, 0, 1e9, 0),
-    inv,
-    equipped: typeof d.equipped === 'string' && ID_RE.test(d.equipped) ? d.equipped : 'wood_sword',
-    armor: typeof d.armor === 'string' && ID_RE.test(d.armor) && inv[d.armor] ? d.armor : null,
-    helmet: typeof d.helmet === 'string' && ID_RE.test(d.helmet) && inv[d.helmet] ? d.helmet : null,
-    quest,
-    pos: Array.isArray(d.pos) ? [num(d.pos[0], -200, 200, 0), 0, num(d.pos[2], -200, 200, 8)] : [0, 0, 8],
-  };
-}
-
+// ---------- Saves (o servidor é a fonte da verdade; o cliente nunca manda o progresso) ----------
 export function loadCharacter(userId) {
   const row = q.getCharacter.get(userId);
-  if (!row) return null;
-  try { return JSON.parse(row.data); } catch { return null; }
+  let data = null;
+  if (row) { try { data = JSON.parse(row.data); } catch { /* corrompido: personagem novo */ } }
+  return normalizeCharacter(data);
 }
 
-export function saveCharacter(userId, data) {
-  const clean = sanitizeSave(data);
-  if (!clean) return false;
-  q.upsertCharacter.run(userId, JSON.stringify(clean), Date.now());
-  return true;
+export function saveCharacter(userId, c) {
+  q.upsertCharacter.run(userId, JSON.stringify(publicCharacter(c)), Date.now());
 }

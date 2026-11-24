@@ -3,7 +3,13 @@ import { buildWorld, makeLabel } from './world.js';
 import { createCharacter, animateCharacter, flash, setGear } from './character.js';
 import { EnemyManager, TYPES } from './enemies.js';
 import { QUESTS } from './quests.js';
-import { ITEMS, ATTACK, SLOTS, rollDrop, damageReduction } from './items.js';
+import { ITEMS, ATTACK, SLOTS } from './items.js';
+import {
+  newCharacter, normalizeCharacter, publicCharacter, LootBag, act, kill, hurt, xpToNext,
+  weaponOf, defenseOf, isEquipped as isEquippedBy, rollDamage as rollDamageFor,
+} from './shared/progress.js';
+import { NPCS, WELL, INTERACT_RANGE } from './shared/worldData.js';
+import { ROLES, roleOf, tagged, can, STAFF_COMMANDS } from './shared/roles.js';
 import { Input, keyLabel } from './input.js';
 import { UI } from './ui.js';
 import { Projectiles } from './combat.js';
@@ -60,39 +66,30 @@ const enemies = new EnemyManager(scene, world, sfx, { online: session.online });
 const projectiles = new Projectiles(scene, world, enemies, (e, dir) => enemies.arrowHit(e, dir.x, dir.z, rollDamage));
 projectiles.onWorld = (pos) => sfx('arrowHit', pos, 0.7);
 
-// ---------- Save ----------
+// ---------- Personagem / save ----------
+// Online o progresso (XP, ouro, itens, vida, missões, baús) é do SERVIDOR: aqui só mostramos e mandamos pedidos.
+// Offline as mesmas regras (shared/progress.js) rodam aqui e o save fica no navegador.
 const SAVE_KEY = 'blockquest-save-v2';
-const DEFAULTS = {
-  level: 1, xp: 0, gold: 10, maxHp: 100, hp: 100, kills: 0,
-  inv: { potion: 3, wood_sword: 1 }, equipped: 'wood_sword', armor: null, helmet: null,
-  quest: { idx: 0, status: 'available', progress: 0 }, pos: [0, 0, 8],
-};
 function load() {
   try {
-    let s;
-    if (session.online) s = session.save; // online: progresso vem do servidor (null = personagem novo)
-    else {
-      s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
-      const old = !s && JSON.parse(localStorage.getItem('blockquest-save-v1') || 'null');
-      if (old) { // migra save antigo (weaponLvl/potions) para inventário
-        const eq = ['wood_sword', 'iron_sword', 'steel_sword', 'rune_blade'][old.weaponLvl || 0];
-        s = { ...old, inv: { potion: old.potions || 0, wood_sword: 1, [eq]: 1 }, equipped: eq };
-      }
+    if (session.online) return normalizeCharacter(session.save);
+    let s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+    const old = !s && JSON.parse(localStorage.getItem('blockquest-save-v1') || 'null');
+    if (old) { // migra save antigo (weaponLvl/potions) para inventário
+      const eq = ['wood_sword', 'iron_sword', 'steel_sword', 'rune_blade'][old.weaponLvl || 0];
+      s = { ...old, inv: { potion: old.potions || 0, wood_sword: 1, [eq]: 1 }, equipped: eq };
     }
-    const merged = { ...structuredClone(DEFAULTS), ...(s || {}) };
-    if (!ITEMS[merged.equipped]) merged.equipped = 'wood_sword';
-    // equipamento que não existe mais ou não está no inventário volta a ficar vazio
-    for (const slot of ['armor', 'helmet']) if (!ITEMS[merged[slot]] || !merged.inv[merged[slot]]) merged[slot] = null;
-    return merged;
-  } catch { return structuredClone(DEFAULTS); }
+    return normalizeCharacter(s);
+  } catch { return newCharacter(); }
 }
+/** só offline: online quem salva é o servidor */
 function save() {
-  const { level, xp, gold, maxHp, hp, kills, inv, equipped, armor, helmet, quest } = player;
-  const data = { level, xp, gold, maxHp, hp: Math.ceil(hp), kills, inv, equipped, armor, helmet, quest, pos: [player.pos.x, 0, player.pos.z] };
-  if (net) net.save(data);
-  else localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  if (net) return;
+  const data = publicCharacter({ ...player, pos: [player.pos.x, 0, player.pos.z] });
+  localStorage.setItem(SAVE_KEY, JSON.stringify(data));
 }
 const saved = load();
+const localLoot = new LootBag(); // baús do modo offline
 
 // ---------- Jogador ----------
 const player = {
@@ -104,7 +101,7 @@ const player = {
 const hero = createCharacter({ shirt: 0xd9433b, pants: 0x2b3a67, hair: 0x3b2414, weapon: true, bow: true });
 scene.add(hero.root);
 
-const weapon = () => ITEMS[player.equipped];
+const weapon = () => weaponOf(player);
 function refreshWeapon() {
   const w = weapon();
   hero.sword.visible = w.style === 'melee';
@@ -114,102 +111,105 @@ function refreshWeapon() {
 }
 refreshWeapon();
 
-/** defesa total do equipamento e a % de dano que ela bloqueia */
-const defense = () => (ITEMS[player.armor]?.def || 0) + (ITEMS[player.helmet]?.def || 0);
-const isEquipped = (id) => id === player.equipped || id === player.armor || id === player.helmet;
+/** defesa total do equipamento */
+const defense = () => defenseOf(player);
+const isEquipped = (id) => isEquippedBy(player, id);
 
-const xpToNext = (l) => Math.floor(50 * Math.pow(l, 1.5));
 const facing = () => new THREE.Vector3(Math.sin(player.rotY), 0, Math.cos(player.rotY));
 const headPos = (p, hgt = 2.8) => new THREE.Vector3(p.x, hgt, p.z);
 const distXZ = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+/** dano do golpe (só offline; online o servidor rola o dano com o nível e a arma dele) */
+const rollDamage = () => rollDamageFor(player);
 
-function rollDamage() {
-  const base = 10 + player.level * 3 + weapon().bonus;
-  const crit = Math.random() < 0.15;
-  const dmg = Math.round(base * (0.85 + Math.random() * 0.3) * (crit ? 2 : 1));
-  return { dmg, crit };
+const CHAR_KEYS = ['level', 'xp', 'gold', 'maxHp', 'hp', 'kills', 'inv', 'equipped', 'armor', 'helmet', 'quest'];
+/** personagem vindo do servidor substitui o local */
+function applyChar(c) {
+  if (!c) return;
+  for (const k of CHAR_KEYS) if (k in c) player[k] = c[k];
+  if ('dead' in c) player.dead = !!c.dead;
+  refreshWeapon();
+  ui.refresh();
 }
 
-function gainXp(n) {
-  player.xp += n;
-  ui.float(headPos(player.pos, 3.3), `+${n} XP`, '#6fd0ff', 16);
-  while (player.xp >= xpToNext(player.level)) {
-    player.xp -= xpToNext(player.level);
-    player.level++;
-    player.maxHp += 15;
-    player.hp += 15; // não cura: só ganha os 15 de vida máxima nova
-    ui.float(headPos(player.pos, 3.8), 'LEVEL UP!', '#f5b82e', 30);
-    ui.log(`Você subiu para o nível ${player.level}! Vida máxima: ${player.maxHp}`, 'good');
-    sfx('levelUp');
+const ctxLocal = () => ({ pos: player.pos, now: player.t, rand: Math.random, loot: localLoot });
+/** Pedido do jogador: offline aplica as regras aqui; online manda pro servidor e espera o resultado (fx). */
+function request(a) {
+  if (net) { net.send({ t: 'act', ...a }); return; }
+  const fx = [];
+  act(player, a, ctxLocal(), fx);
+  applyFx(fx);
+  save();
+}
+
+/** Mostra os efeitos que as regras de progresso geraram (iguais online e offline) */
+function applyFx(list = []) {
+  const at = (o) => (o.at ? new THREE.Vector3(o.at.x, 0, o.at.z) : player.pos);
+  let gearChanged = false;
+  for (const f of list) {
+    switch (f.k) {
+      case 'log': ui.log(f.text, f.cls); break;
+      case 'sfx': sfx(f.name, f.at ? at(f) : null); break;
+      case 'float': ui.float(headPos(at(f), f.h ?? 2.8), f.text, f.color, f.size); break;
+      case 'levelUp': ui.float(headPos(player.pos, 3.8), 'LEVEL UP!', '#f5b82e', 30); sfx('levelUp'); break;
+      case 'heal': ui.float(headPos(player.pos), `+${f.n}`, f.color, 22); break;
+      case 'loot': loot.drop(f.item, { x: f.x, z: f.z }, f.lid); break;
+      case 'lootGone': loot.remove(f.lid); break;
+      case 'pickup': {
+        const it = ITEMS[f.item], gear = !!SLOTS[it.kind];
+        ui.float(headPos(player.pos, 3.4), `${it.icon} ${it.name}`, gear ? '#d9b3ff' : '#b8ffb0', 18);
+        ui.log(`Pegou ${it.icon} ${it.name}!${gear ? ` Abra o inventário [${keyLabel(input.bindings.inventory.find(Boolean))}] para equipar.` : ''}`, 'good');
+        break;
+      }
+      case 'equip': {
+        const it = ITEMS[f.item];
+        if (it.kind === 'weapon') lockTarget = null;
+        sfx(it.kind === 'weapon' ? 'ui' : 'equip');
+        ui.log(`Equipou ${it.icon} ${it.name}.`, 'info');
+        gearChanged = true;
+        break;
+      }
+      case 'hurt':
+        player.lastHurt = player.t;
+        sfx('playerHurt');
+        flash(hero, 0x660000);
+        setTimeout(() => flash(hero, 0x000000), 120);
+        ui.float(headPos(player.pos), `-${f.dmg}`, '#ff5d5d', 22);
+        break;
+      case 'death':
+        player.dead = true;
+        sfx('playerDie');
+        lockTarget = null;
+        ui.log(`Você foi derrotado por ${f.by}.${f.lost ? ` Perdeu ${f.lost} de ouro.` : ''}`, 'bad');
+        ui.closeDialog(); ui.closeModal();
+        ui.death(true, () => request({ a: 'respawn' }));
+        break;
+      case 'respawn':
+        player.dead = false;
+        player.pos.set(f.pos[0], 0, f.pos[2]); player.vy = 0;
+        hero.root.rotation.z = 0;
+        ui.death(false);
+        break;
+      case 'closeDialog': ui.closeDialog(); break;
+      default: break;
+    }
   }
-  save();
+  if (gearChanged) refreshWeapon();
+  ui.refresh();
 }
 
-// ---------- Itens ----------
-function addItem(id, n = 1) { player.inv[id] = (player.inv[id] || 0) + n; }
-function removeItem(id, n = 1) {
-  player.inv[id] = (player.inv[id] || 0) - n;
-  if (player.inv[id] <= 0) delete player.inv[id];
-}
-function equip(id) {
-  const it = ITEMS[id];
-  const slot = it && SLOTS[it.kind];
-  if (!player.inv[id] || !slot) return;
-  player[slot] = id;
-  refreshWeapon();
-  if (it.kind === 'weapon') lockTarget = null;
-  sfx(it.kind === 'weapon' ? 'ui' : 'equip');
-  ui.log(`Equipou ${it.icon} ${it.name}.`, 'info');
-  save();
-}
-/** tira armadura/capacete (a arma não: sempre tem uma) */
-function unequip(slot) {
-  if (slot !== 'armor' && slot !== 'helmet') return;
-  const it = ITEMS[player[slot]];
-  player[slot] = null;
-  refreshWeapon();
-  if (it) ui.log(`Removeu ${it.icon} ${it.name}.`, 'info');
-  save();
-}
-function useItem(id) {
-  const it = ITEMS[id];
-  if (it.kind !== 'consumable') return;
-  if (!player.inv[id]) { sfx('deny'); return ui.log(`Sem ${it.name}! Compre com a Mercadora Lia.`, 'bad'); }
-  if (player.dead) return;
-  if (player.hp >= player.maxHp) { sfx('deny'); return ui.log('Vida já está cheia.', 'info'); }
-  removeItem(id);
-  sfx('potion');
-  const heal = Math.round(player.maxHp * it.heal);
-  player.hp = Math.min(player.maxHp, player.hp + heal);
-  ui.float(headPos(player.pos), `+${heal}`, '#7dff7d', 22);
-  save();
-}
-function buy(id) {
-  const it = ITEMS[id];
-  if (player.gold < it.price) { sfx('deny'); return; }
-  player.gold -= it.price;
-  addItem(id);
-  sfx('coin');
-  ui.log(`Comprou ${it.icon} ${it.name}.`, 'gold');
-  if (SLOTS[it.kind]) equip(id);
-  save();
-}
-function sell(id) {
-  const it = ITEMS[id];
-  if (!player.inv[id]) return;
-  if (isEquipped(id) && player.inv[id] <= 1) return;
-  removeItem(id);
-  player.gold += it.sell;
-  sfx('coin');
-  ui.log(`Vendeu ${it.icon} ${it.name} por ${it.sell} ouro.`, 'gold');
-  save();
-}
+const equip = (id) => request({ a: 'equip', id });
+const unequip = (slot) => request({ a: 'unequip', slot });
+const useItem = (id) => request({ a: 'use', id });
+const buy = (id) => request({ a: 'buy', id });
+const sell = (id) => request({ a: 'sell', id });
+/** só para testes offline no console */
+function addItem(id, n = 1) { player.inv[id] = (player.inv[id] || 0) + n; ui.refresh(); }
 ui.setGame({ player, buy, sell, use: useItem, equip, unequip, isEquipped, defense });
 
 // ---------- NPCs ----------
 const npcs = [
-  { id: 'elder', name: 'Ancião Bento', pos: new THREE.Vector3(4, 0, -5), look: { shirt: 0x6b4fa0, pants: 0x3d2a5c, hair: 0xe8e8e8 } },
-  { id: 'merchant', name: 'Mercadora Lia', pos: new THREE.Vector3(-6, 0, 4), look: { shirt: 0xe0a72e, pants: 0x5a3d1f, hair: 0x8a3b12 } },
+  { id: 'elder', name: NPCS.elder.name, pos: new THREE.Vector3(NPCS.elder.x, 0, NPCS.elder.z), look: { shirt: 0x6b4fa0, pants: 0x3d2a5c, hair: 0xe8e8e8 } },
+  { id: 'merchant', name: NPCS.merchant.name, pos: new THREE.Vector3(NPCS.merchant.x, 0, NPCS.merchant.z), look: { shirt: 0xe0a72e, pants: 0x5a3d1f, hair: 0x8a3b12 } },
 ];
 for (const n of npcs) {
   n.char = createCharacter(n.look);
@@ -245,33 +245,13 @@ function talk(npc) {
   if (q.status === 'done') return ui.dialog(npc.name, 'Graças a você a Vila Pedraverde está em paz. Novas aventuras virão em breve...');
   if (q.status === 'available') {
     return ui.dialog(`${npc.name} — ${def.title}`, def.intro, [{
-      label: 'Aceitar missão', onClick: () => {
-        q.status = 'active'; q.progress = 0;
-        sfx('quest');
-        ui.log(`Missão aceita: ${def.title}`, 'info'); ui.closeDialog(); save();
-      },
+      label: 'Aceitar missão', onClick: () => request({ a: 'quest_accept' }),
     }]);
   }
   if (q.status === 'active') return ui.dialog(npc.name, `${def.progressText(q.progress, def.count)}. Vá até ${def.where.label} (siga a ★ no mapa).`);
   if (q.status === 'complete') {
     return ui.dialog(npc.name, def.doneText, [{
-      label: 'Receber recompensa', onClick: () => {
-        const r = def.reward;
-        sfx('quest'); sfx('coin');
-        player.gold += r.gold || 0;
-        const got = [];
-        for (const [id, n] of Object.entries(r.items || {})) { addItem(id, n); got.push(`${n}x ${ITEMS[id].name}`); }
-        ui.log(`Recompensa: ${r.gold} ouro${got.length ? `, ${got.join(', ')}` : ''}`, 'gold');
-        for (const id of Object.keys(r.items || {})) {
-          const it = ITEMS[id];
-          if (it.kind === 'weapon' && it.style === weapon().style && it.bonus > weapon().bonus) equip(id);
-          if ((it.kind === 'armor' || it.kind === 'helmet') && it.def > (ITEMS[player[it.kind]]?.def || 0)) equip(id);
-        }
-        q.idx++; q.progress = 0;
-        q.status = q.idx < QUESTS.length ? 'available' : 'done';
-        ui.closeDialog();
-        gainXp(r.xp);
-      },
+      label: 'Receber recompensa', onClick: () => request({ a: 'quest_turnin' }),
     }]);
   }
 }
@@ -369,108 +349,64 @@ function attack() {
   }
 }
 
+/** Abate (só offline; online o servidor manda o resultado como fx) */
 function onKill(e) {
-  const g = e.def.gold[0] + Math.floor(Math.random() * (e.def.gold[1] - e.def.gold[0] + 1));
-  player.gold += g;
-  player.kills++;
-  sfx('coin', e.pos);
-  ui.float(headPos(e.pos, e.def.height + 1), `+${g} 🪙`, '#ffd65c', 16);
-  ui.log(`${e.def.name} derrotado! +${g} ouro`, 'gold');
   if (lockTarget === e) lockTarget = null;
-  // a cada 5 abates cai um item; chefe sempre deixa uma arma rara
-  if (player.kills % 5 === 0) {
-    loot.drop(rollDrop(), e.pos);
-    sfx('drop', e.pos);
-    ui.log('🎁 Um item caiu! Encoste no baú para pegar.', 'good');
-  }
-  if (e.def.boss) {
-    loot.drop(rollDrop(true), new THREE.Vector3(e.pos.x + 1.5, 0, e.pos.z));
-    ui.log('🎁 O chefe deixou cair uma arma rara!', 'good');
-  }
-  const q = player.quest, def = QUESTS[q.idx];
-  if (q.status === 'active' && def.target === e.type) {
-    q.progress++;
-    if (q.progress >= def.count) { q.status = 'complete'; sfx('quest'); ui.log(`Missão concluída! Volte ao ${elder.name}.`, 'info'); }
-  }
-  gainXp(e.def.xp);
-}
-
-function onPickup(id) {
-  const it = ITEMS[id];
-  addItem(id);
-  sfx('pickup');
-  const gearDrop = !!SLOTS[it.kind];
-  ui.float(headPos(player.pos, 3.4), `${it.icon} ${it.name}`, gearDrop ? '#d9b3ff' : '#b8ffb0', 18);
-  ui.log(`Pegou ${it.icon} ${it.name}!${gearDrop ? ` Abra o inventário [${keyLabel(input.bindings.inventory.find(Boolean))}] para equipar.` : ''}`, 'good');
-  ui.refresh();
+  const fx = [];
+  kill(player, e.type, { x: e.pos.x, z: e.pos.z }, ctxLocal(), fx);
+  applyFx(fx);
   save();
 }
 
+/** Dano de monstro (só offline; online o servidor aplica armadura, morte e perda de ouro) */
 function onPlayerHit(dmg, e) {
-  if (player.dead) return;
-  // armadura + capacete reduzem o dano em % (com retorno decrescente)
-  const real = Math.max(1, Math.round(dmg * (0.85 + Math.random() * 0.3) * (1 - damageReduction(defense()))));
-  player.hp -= real;
-  player.lastHurt = player.t;
-  sfx('playerHurt');
-  flash(hero, 0x660000);
-  setTimeout(() => flash(hero, 0x000000), 120);
-  ui.float(headPos(player.pos), `-${real}`, '#ff5d5d', 22);
-  if (player.hp <= 0) {
-    player.hp = 0; player.dead = true;
-    sfx('playerDie');
-    lockTarget = null;
-    const lost = Math.floor(player.gold * 0.1);
-    player.gold -= lost;
-    ui.log(`Você foi derrotado por ${e.def.name}.`, 'bad');
-    ui.closeDialog(); ui.closeModal();
-    ui.death(true, () => {
-      player.dead = false; player.hp = player.maxHp;
-      player.pos.set(0, 0, 8); player.vy = 0;
-      hero.root.rotation.z = 0;
-      ui.death(false); save();
-    });
-  }
+  const fx = [];
+  hurt(player, dmg, e.type, ctxLocal(), fx);
+  applyFx(fx);
 }
 
 // ---------- Poço da vila: única cura fora as poções ----------
-const WELL = { x: 0, z: 0, r: 3.4 };
-function drinkFromWell() {
-  if (player.hp >= player.maxHp) { sfx('deny'); return; }
-  const healed = Math.round(player.maxHp - player.hp);
-  player.hp = player.maxHp;
-  sfx('potion');
-  ui.float(headPos(player.pos), `+${healed}`, '#7dd8ff', 22);
-  ui.log('💧 Você bebeu a água do poço e recuperou toda a vida.', 'good');
-  save();
-}
+const drinkFromWell = () => request({ a: 'well' });
 
 // ---------- Multiplayer ----------
 const bubbles = new Bubbles(scene);
 let sendChat = null;
+let myRole = session.user?.role || 'player';
 if (session.online) {
-  ui.setAccount(session.user.username, true);
+  ui.setAccount(session.user.username, true, myRole);
   ui.netStatus('🟡 Conectando…');
   remote = new RemotePlayers(scene);
   net = new Net(session.token);
   const onlineText = () => `🟢 Online · ${remote.map.size + 1} jogador${remote.map.size ? 'es' : ''}`;
   net.on('welcome', (m) => {
     enemies.myId = m.id;
+    myRole = m.role;
+    ui.setAccount(m.name, true, myRole);
+    // o personagem é o do servidor (inclusive vida e baús ainda no chão)
+    applyChar(m.c);
+    player.pos.set(m.c.pos[0], 0, m.c.pos[2]);
+    loot.clear();
+    applyFx(m.loot);
+    if (m.c.dead) applyFx([{ k: 'death', by: 'um monstro', lost: 0 }]);
     remote.clear();
     for (const p of m.players) remote.add(p);
     ui.netStatus(onlineText());
     ui.chatMsg(null, `Conectado como ${m.name}. ${m.players.length ? `${m.players.length} outro(s) jogador(es) online.` : 'Você é o único online agora.'}`, 'sys');
-    save(); // garante que o personagem existe no servidor (ex.: conta nova)
+    if (myRole !== 'player') ui.chatMsg(null, `Você é ${roleOf(myRole).label}. Seus comandos estão na /ajuda.`, 'sys');
   });
-  net.on('join', (m) => { remote.add(m); ui.netStatus(onlineText()); ui.chatMsg(null, `${m.name} entrou no jogo.`, 'sys'); sfx('ui'); });
+  net.on('join', (m) => { remote.add(m); ui.netStatus(onlineText()); ui.chatMsg(null, `${tagged(m.name, m.role)} entrou no jogo.`, 'sys'); sfx('ui'); });
   net.on('leave', (m) => { remote.remove(m.id); ui.netStatus(onlineText()); ui.chatMsg(null, `${m.name} saiu.`, 'sys'); });
   net.on('snap', (m) => remote.snapshot(m.players, net.id));
+  net.on('role', (m) => {
+    if (m.id === net.id) { myRole = m.role; ui.setAccount(session.user.username, true, myRole); } else remote.setRole(m.id, m.role);
+  });
 
-  // monstros vindos do servidor
+  // progresso e monstros vindos do servidor
+  net.on('fx', (m) => { applyChar(m.c); applyFx(m.fx); });
+  net.on('setpos', (m) => { player.pos.set(m.x, player.pos.y, m.z); player.vy = 0; });
   enemies.send = (msg) => net.send(msg);
   net.on('mobs', (m) => enemies.applySnapshot(m.m));
   net.on('mev', (ev) => enemies.onEvent(ev));
-  net.on('hurt', (m) => onPlayerHit(m.dmg, { def: TYPES[m.mob] || { name: 'um monstro' } }));
 
   // ---------- Chat: geral (todos + balão na cabeça), sussurro (/w), ignorar ----------
   const IGNORE_KEY = 'blockquest-ignored';
@@ -478,24 +414,27 @@ if (session.online) {
   const saveIgnored = () => localStorage.setItem(IGNORE_KEY, JSON.stringify([...ignored]));
   let lastWhisperFrom = null;
   const anchorFor = (id) => (id === net.id ? hero.root : remote.map.get(id)?.char.root);
+  const staffMsg = (role) => roleOf(role).rank > 0; // mensagens da equipe nunca são escondidas pelo /ignorar
 
   net.on('chat', (m) => {
-    if (ignored.has(m.from.toLowerCase())) return;
-    ui.chatMsg(m.from, m.text, m.id === net.id ? 'me' : '', m.id === net.id ? null : m.from);
+    if (ignored.has(m.from.toLowerCase()) && !staffMsg(m.role)) return;
+    ui.chatMsg(m.from, m.text, m.id === net.id ? 'me' : '', m.id === net.id ? null : m.from, m.role);
     const anchor = anchorFor(m.id);
     if (anchor) bubbles.say(m.id, anchor, m.text);
     if (m.id !== net.id) sfx('ui');
   });
   net.on('whisper', (m) => {
     const mine = m.id === net.id;
-    if (!mine && ignored.has(m.from.toLowerCase())) return;
+    if (!mine && ignored.has(m.from.toLowerCase()) && !staffMsg(m.role)) return;
     if (!mine) lastWhisperFrom = m.from;
-    ui.chatMsg(mine ? `[Para ${m.to}]` : `[De ${m.from}]`, m.text, 'whisper', mine ? null : m.from);
+    ui.chatMsg(mine ? `[Para ${m.to}]` : `[De ${m.from}]`, m.text, 'whisper', mine ? null : m.from, mine ? null : m.role);
     const anchor = anchorFor(m.id); // só quem participa vê o balão do sussurro
     if (anchor) bubbles.say(m.id, anchor, m.text, { whisper: true });
     if (!mine) sfx('pickup');
   });
   net.on('sys', (m) => ui.chatMsg(null, m.text, 'sys'));
+  net.on('staff', (m) => { ui.chatMsg(`[Equipe] ${m.from}`, m.text, 'staff', m.from === session.user.username ? null : m.from, m.role); sfx('ui'); });
+  net.on('announce', (m) => { ui.chatMsg(`📢 ${m.from}`, m.text, 'announce'); ui.announce(m.text, m.from); sfx('quest'); });
 
   // ---------- Moderação: menu no nome do jogador e denúncia ----------
   const ignore = (name) => {
@@ -503,19 +442,37 @@ if (session.online) {
     ui.chatMsg(null, `Você não vai mais ver mensagens de ${name}.`, 'sys');
   };
   const report = (name) => ui.reportDialog(name, ({ reason, note }) => net.send({ t: 'report', name, reason, note }));
-  ui.onPlayerMenu = (name, x, y) => ui.playerMenu(name, x, y, [
-    { label: '💬 Sussurrar', run: () => { ui.openChat((txt) => sendChat(txt)); const inp = document.getElementById('chatinput'); inp.value = `/w ${name} `; } },
-    ignored.has(name.toLowerCase())
-      ? { label: '👁️ Deixar de ignorar', run: () => sendChat(`/designorar ${name}`) }
-      : { label: '🔇 Ignorar', run: () => ignore(name) },
-    { label: '🚩 Denunciar', danger: true, run: () => report(name) },
-  ]);
+  const cmd = (c, ...args) => net.send({ t: 'cmd', cmd: c, args });
+  ui.onPlayerMenu = (name, x, y) => {
+    const items = [
+      { label: '💬 Sussurrar', run: () => { ui.openChat((txt) => sendChat(txt)); document.getElementById('chatinput').value = `/w ${name} `; } },
+      ignored.has(name.toLowerCase())
+        ? { label: '👁️ Deixar de ignorar', run: () => sendChat(`/designorar ${name}`) }
+        : { label: '🔇 Ignorar', run: () => ignore(name) },
+      { label: '🚩 Denunciar', danger: true, run: () => report(name) },
+    ];
+    // atalhos da equipe (o servidor confere o cargo de novo)
+    if (can(myRole, 'moderate')) {
+      items.push(
+        { label: '🤐 Mutar 10 min', staff: true, run: () => cmd('/mutar', name, '10') },
+        { label: '👢 Expulsar', staff: true, run: () => cmd('/expulsar', name) },
+      );
+    }
+    if (can(myRole, 'test')) items.push({ label: '📍 Ir até', staff: true, run: () => cmd('/tp', name) });
+    ui.playerMenu(name, x, y, items);
+  };
+
+  const helpText = () => {
+    const base = 'Comandos: /w nome msg (sussurrar) · /r msg (responder) · /ignorar nome · /designorar nome · /denunciar nome · /online. Dica: clique no nome de alguém no chat.';
+    const mine = STAFF_COMMANDS.filter((c) => can(myRole, c.perm));
+    return mine.length ? [base, `Equipe (${roleOf(myRole).label}): ${mine.map((c) => `${c.cmd} — ${c.desc}`).join(' · ')}`] : [base];
+  };
 
   sendChat = (raw) => {
     const text = raw.trim();
-    const [cmd, ...rest] = text.split(' ');
+    const [c, ...rest] = text.split(' ').filter(Boolean);
     const arg = rest.join(' ').trim();
-    switch (cmd.toLowerCase()) {
+    switch ((c || '').toLowerCase()) {
       case '/w': case '/s': case '/sussurrar': {
         const [to, ...msg] = rest;
         if (!to || !msg.length) return ui.chatMsg(null, 'Use: /w nome mensagem', 'sys');
@@ -535,26 +492,32 @@ if (session.online) {
         ignored.delete(arg.toLowerCase()); saveIgnored();
         return ui.chatMsg(null, `${arg} voltou a aparecer no seu chat.`, 'sys');
       case '/online':
-        return ui.chatMsg(null, `Online: ${[net.id ? session.user.username : null, ...remote.list().map((p) => p.name)].filter(Boolean).join(', ')}`, 'sys');
+        return ui.chatMsg(null, `Online: ${[tagged(session.user.username, myRole), ...remote.list().map((p) => tagged(p.name, p.role))].join(', ')}`, 'sys');
       case '/ajuda': case '/?':
-        return ui.chatMsg(null, 'Comandos: /w nome msg (sussurrar) · /r msg (responder) · /ignorar nome · /designorar nome · /denunciar nome · /online. Dica: clique no nome de alguém no chat.', 'sys');
+        for (const line of helpText()) ui.chatMsg(null, line, 'sys');
+        return;
       default:
-        if (cmd.startsWith('/')) return ui.chatMsg(null, 'Comando desconhecido. Digite /ajuda', 'sys');
+        if (c?.startsWith('/')) return cmd(c.toLowerCase(), ...rest); // comandos da equipe: o servidor decide
         return net.chat(text);
     }
   };
-  net.on('kicked', (m) => { ui.netStatus('🔴 Desconectado'); ui.chatMsg(null, m.message, 'sys'); ui.log(m.message, 'bad'); });
+  net.on('kicked', (m) => {
+    ui.netStatus(m.banned ? '⛔ Conta suspensa' : '🔴 Desconectado');
+    ui.chatMsg(null, m.message, 'sys');
+    ui.log(m.message, 'bad');
+    ui.announce(m.message, m.banned ? 'Conta suspensa' : 'Desconectado');
+  });
   net.on('error', (m) => { if (m.code === 'auth') logoutSession(null); });
   net.on('disconnect', (e) => {
-    if (e.code === 4001 || e.code === 4003) return;
+    if ([4001, 4003, 4004, 4005].includes(e.code)) return;
     remote.clear();
     ui.netStatus('🟠 Reconectando…');
   });
-  document.getElementById('logout').onclick = () => { save(); setTimeout(() => logoutSession(session.token), 150); };
-  addEventListener('beforeunload', save);
+  document.getElementById('logout').onclick = () => logoutSession(session.token);
 } else {
   ui.setAccount('Aventureiro (offline)', false);
 }
+addEventListener('beforeunload', save); // offline: salva ao fechar (online não faz nada)
 
 // ---------- Câmera ----------
 const cam = { yaw: 0, pitch: 0.38, dist: 13 };
@@ -629,7 +592,7 @@ function update(dt) {
   // NPC próximo (ou o poço da vila, que cura)
   let near = null;
   for (const n of npcs) if (n.pos.distanceTo(player.pos) < 4) near = n;
-  const nearWell = !near && Math.hypot(player.pos.x - WELL.x, player.pos.z - WELL.z) < WELL.r;
+  const nearWell = !near && Math.hypot(player.pos.x - WELL.x, player.pos.z - WELL.z) < INTERACT_RANGE.well - 1;
   const talkKey = keyLabel(input.bindings.talk.find(Boolean));
   if (near && canAct) ui.prompt(`[${talkKey}] ${near.id === 'merchant' ? 'Abrir loja de' : 'Falar com'} ${near.name}`);
   else if (nearWell && canAct) ui.prompt(player.hp < player.maxHp ? `[${talkKey}] Beber água do poço (recupera toda a vida)` : '💧 Poço da vila — sua vida está cheia');
@@ -669,7 +632,7 @@ function update(dt) {
 
   enemies.update(dt, player, camera);
   projectiles.update(dt);
-  loot.update(dt, player, onPickup);
+  loot.update(dt, player, (lid) => request({ a: 'pickup', lid }));
   world.update(t, dt);
   player.moveAmount = moveAmount;
   if (net) {
@@ -741,7 +704,13 @@ function update(dt) {
   ui.updateFloats(camera, dt);
 
   saveTimer += dt;
-  if (saveTimer > 5 && !player.dead) { saveTimer = 0; save(); }
+  if (saveTimer > 5 && !player.dead && !net) {
+    saveTimer = 0;
+    save();
+    const fx = [];
+    localLoot.expire(player.t, fx); // baús offline também somem depois de um tempo
+    applyFx(fx);
+  }
 }
 
 function frame(now) {
@@ -757,4 +726,4 @@ ui.log('Bem-vindo a BlockQuest! Fale com o Ancião Bento.', 'info');
 frame();
 
 // atalho de debug no console
-window.game = { player, enemies, loot, ui, equip, unequip, defense, onPlayerHit, addItem, projectiles, world, sound, session, get net() { return net; }, get remote() { return remote; }, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };
+window.game = { player, enemies, loot, ui, equip, unequip, defense, onPlayerHit, addItem, request, applyFx, localLoot, projectiles, world, sound, session, get net() { return net; }, get remote() { return remote; }, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };

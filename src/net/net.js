@@ -6,7 +6,6 @@ export class Net {
     this.ws = null;
     this.connected = false;
     this.id = null;
-    this.pendingSave = null;
     this.lastState = 0;
     this.stopped = false;
     this.connect();
@@ -30,7 +29,6 @@ export class Net {
       if (msg.t === 'welcome') {
         this.connected = true;
         this.id = msg.id;
-        if (this.pendingSave) { this.send({ t: 'save', data: this.pendingSave }); this.pendingSave = null; }
       }
       this.emit(msg.t, msg);
     };
@@ -38,8 +36,8 @@ export class Net {
       const was = this.connected;
       this.connected = false;
       this.emit('disconnect', { code: ev.code, was });
-      // 4001 = conta entrou em outro lugar, 4003 = sessão inválida: não reconecta
-      if (this.stopped || ev.code === 4001 || ev.code === 4003) return;
+      // 4001 = conta entrou em outro lugar, 4003 = sessão inválida, 4004 = suspensa, 4005 = expulso: não reconecta
+      if (this.stopped || [4001, 4003, 4004, 4005].includes(ev.code)) return;
       setTimeout(() => this.connect(), 3000);
     };
   }
@@ -57,7 +55,6 @@ export class Net {
     this.send({ t: 'state', ...state });
   }
 
-  save(data) { if (!this.send({ t: 'save', data })) this.pendingSave = data; }
   chat(text, to = null) { this.send(to ? { t: 'chat', text, to } : { t: 'chat', text }); }
   close() { this.stopped = true; this.ws?.close(); }
 }

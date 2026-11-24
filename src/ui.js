@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ZONES, WORLD_RADIUS } from './world.js';
 import { ITEMS, SHOP, CATEGORIES, category, itemStats, damageReduction } from './items.js';
 import { ACTIONS, RESERVED, keyLabel } from './input.js';
+import { roleOf } from './shared/roles.js';
 
 const $ = (id) => document.getElementById(id);
 const tmp = new THREE.Vector3();
@@ -44,8 +45,16 @@ export class UI {
   isBlocking() { return this.dialogOpen || this.modal !== null || this.chatOpen || this.reportOpen; }
 
   // ---------- Conta / online ----------
-  setAccount(name, online) {
+  setAccount(name, online, role = 'player') {
+    const r = roleOf(role);
     $('pname').textContent = name;
+    // etiqueta do cargo ao lado do nome (só equipe)
+    let badge = $('pbadge');
+    if (!badge) { badge = document.createElement('span'); badge.id = 'pbadge'; badge.className = 'rbadge'; $('pname').after(badge); }
+    badge.textContent = r.tag || '';
+    badge.title = r.label;
+    badge.style.background = r.color;
+    badge.classList.toggle('hidden', !r.tag);
     $('account').classList.toggle('hidden', !online);
     $('chat').classList.toggle('hidden', !online);
     this.online = online;
@@ -55,12 +64,22 @@ export class UI {
   netStatus(text) { $('netstatus').innerHTML = text; }
 
   // ---------- Chat ----------
-  chatMsg(from, text, cls = '', who = null) {
+  chatMsg(from, text, cls = '', who = null, role = null) {
     const box = $('chatlog');
     const d = document.createElement('div');
     d.className = cls;
+    const r = roleOf(role);
+    if (from && r.tag) { // [ADM] / [MOD] / [QA] na frente do nome
+      const t = document.createElement('span');
+      t.className = 'rbadge';
+      t.textContent = r.tag;
+      t.title = r.label;
+      t.style.background = r.color;
+      d.append(t);
+    }
     if (from) {
       const b = document.createElement('b');
+      if (r.tag) b.style.color = r.color;
       b.textContent = `${from}: `;
       if (who) { // nome clicável: abre o menu (sussurrar / ignorar / denunciar)
         b.className = 'pname';
@@ -87,6 +106,7 @@ export class UI {
       const b = document.createElement('button');
       b.textContent = it.label;
       if (it.danger) b.className = 'danger';
+      if (it.staff) b.className = 'staff';
       b.onclick = (e) => { e.stopPropagation(); this.closePlayerMenu(); it.run(); };
       m.append(b);
     }
@@ -235,6 +255,21 @@ export class UI {
   }
 
   closeDialog() { this.dialogOpen = false; $('dialog').classList.add('hidden'); }
+
+  /** Aviso grande no meio da tela (avisos da equipe, expulsão) */
+  announce(text, from = '') {
+    let el = $('announce');
+    if (!el) { el = document.createElement('div'); el.id = 'announce'; document.body.append(el); }
+    el.replaceChildren();
+    const h = document.createElement('small'); h.textContent = from;
+    const t = document.createElement('div'); t.textContent = text;
+    el.append(h, t);
+    el.classList.remove('hidden', 'show');
+    void el.offsetWidth; // reinicia a animação
+    el.classList.add('show');
+    clearTimeout(this._annT);
+    this._annT = setTimeout(() => el.classList.remove('show'), 7000);
+  }
 
   death(show, onRespawn) {
     $('death').classList.toggle('hidden', !show);

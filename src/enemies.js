@@ -170,7 +170,7 @@ export class EnemyManager {
         }
         break;
       case 'killed':
-        if (ev.credit?.includes(this.myId)) {
+        if (!this.online && ev.credit?.includes(this.myId)) { // online: a recompensa vem do servidor (fx)
           this.handlers.onKill(v || { id: ev.id, type: ev.type, def: TYPES[ev.type], pos: at, state: 'dead' });
         }
         break;
@@ -183,8 +183,8 @@ export class EnemyManager {
           if (ev.pid === this.myId) this.handlers.onWild(v);
         }
         break;
-      case 'hurtPlayer': // só no offline (online o servidor manda {t:'hurt'} direto pro jogador)
-        if (ev.pid === this.myId) this.handlers.onPlayerHit(ev.dmg, { def: TYPES[ev.type] });
+      case 'hurtPlayer': // só no offline (online o servidor aplica o dano e manda o resultado)
+        if (ev.pid === this.myId) this.handlers.onPlayerHit(ev.dmg, { def: TYPES[ev.type], type: ev.type });
         break;
       case 'removed': this.removeView(ev.id); break;
       default: break;

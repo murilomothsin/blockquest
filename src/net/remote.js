@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { createCharacter, animateCharacter, setGear } from '../character.js';
 import { makeLabel } from '../world.js';
 import { ITEMS } from '../items.js';
+import { roleOf, tagged } from '../shared/roles.js';
 
 const SHIRTS = [0x2f6fdf, 0x2e9d4a, 0x8a3fb5, 0xe0a72e, 0x1fa3a3, 0xff7ab8, 0x6b7280, 0xf97316];
 const PANTS = [0x2b3a67, 0x3b2a1a, 0x333a4a, 0x14532d];
@@ -20,7 +21,7 @@ export class RemotePlayers {
     this.map = new Map();
   }
 
-  add({ id, name, ...state }) {
+  add({ id, name, role = 'player', ...state }) {
     if (this.map.has(id)) return this.map.get(id);
     const h = hash(name.toLowerCase());
     const char = createCharacter({
@@ -29,11 +30,11 @@ export class RemotePlayers {
     });
     char.root.visible = false;
     this.scene.add(char.root);
-    const label = makeLabel(name, '#9fe3ff', 0.75);
+    const label = makeLabel(tagged(name, role), roleOf(role).color, 0.75); // equipe: [ADM]/[MOD]/[QA] colorido
     label.visible = false;
     this.scene.add(label);
     const p = {
-      id, name, char, label,
+      id, name, role, char, label,
       pos: new THREE.Vector3(), target: new THREE.Vector3(), rot: 0, targetRot: 0,
       m: 0, air: false, dead: false, seq: 0, attack: 0, w: null, has: false, t: Math.random() * 10,
     };
@@ -51,6 +52,16 @@ export class RemotePlayers {
   }
 
   clear() { for (const id of [...this.map.keys()]) this.remove(id); }
+
+  /** cargo mudou: refaz a etiqueta em cima da cabeça */
+  setRole(id, role) {
+    const p = this.map.get(id);
+    if (!p) return;
+    p.role = role;
+    this.scene.remove(p.label);
+    p.label = makeLabel(tagged(p.name, role), roleOf(role).color, 0.75);
+    this.scene.add(p.label);
+  }
 
   apply(p, s) {
     p.target.set(s.x, s.y, s.z);

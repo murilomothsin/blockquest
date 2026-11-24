@@ -70,10 +70,10 @@ const DROPS = [
 const BOSS_DROPS = ['rune_blade', 'elven_bow', 'rune_armor', 'elven_armor', 'rune_helmet', 'elven_helmet'];
 
 /** Sorteia o item que cai a cada 5 abates. Chefes sempre deixam um equipamento raro. */
-export function rollDrop(boss = false) {
-  if (boss) return BOSS_DROPS[Math.floor(Math.random() * BOSS_DROPS.length)];
+export function rollDrop(boss = false, rand = Math.random) {
+  if (boss) return BOSS_DROPS[Math.floor(rand() * BOSS_DROPS.length)];
   const total = DROPS.reduce((s, [, w]) => s + w, 0);
-  let r = Math.random() * total;
+  let r = rand() * total;
   for (const [id, w] of DROPS) { if ((r -= w) <= 0) return id; }
   return 'potion';
 }

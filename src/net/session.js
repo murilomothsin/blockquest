@@ -1,6 +1,5 @@
 // Login / criação de conta / modo offline
 const TOKEN_KEY = 'blockquest-token';
-const LOCAL_SAVE_KEY = 'blockquest-save-v2';
 
 class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -36,8 +35,8 @@ export async function startSession() {
       const { user, save } = await api('/me', { token });
       return { online: true, token, user, save };
     } catch (err) {
-      if (err.status === 401) localStorage.removeItem(TOKEN_KEY);
-      return showLogin(err.status === 401 ? 'Sua sessão expirou. Entre de novo.' : err.message);
+      if (err.status === 401 || err.status === 403) localStorage.removeItem(TOKEN_KEY);
+      return showLogin(err.status === 401 ? 'Sua sessão expirou. Entre de novo.' : err.message); // 403 = conta suspensa
     }
   }
   return showLogin();
@@ -48,13 +47,11 @@ function showLogin(message = '') {
     const el = $('login');
     el.classList.remove('hidden');
     let mode = 'login';
-    const hasLocal = !!localStorage.getItem(LOCAL_SAVE_KEY);
 
     const render = () => {
       $('ltab-login').classList.toggle('active', mode === 'login');
       $('ltab-register').classList.toggle('active', mode === 'register');
       $('lconfirm-row').classList.toggle('hidden', mode !== 'register');
-      $('limport-row').classList.toggle('hidden', mode !== 'register' || !hasLocal);
       $('lsubmit').textContent = mode === 'login' ? 'Entrar' : 'Criar conta';
       $('lpass').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
     };
@@ -75,12 +72,9 @@ function showLogin(message = '') {
       try {
         const data = await api(mode === 'login' ? '/login' : '/register', { method: 'POST', body: { username, password } });
         localStorage.setItem(TOKEN_KEY, data.token);
-        let save = data.save;
-        if (mode === 'register' && hasLocal && $('limport').checked) {
-          try { save = JSON.parse(localStorage.getItem(LOCAL_SAVE_KEY)); } catch { /* ignora */ }
-        }
+        // o progresso offline NÃO vai para a conta: online tudo é validado pelo servidor
         el.classList.add('hidden');
-        resolve({ online: true, token: data.token, user: data.user, save });
+        resolve({ online: true, token: data.token, user: data.user, save: data.save });
       } catch (err) {
         setError(err.message);
       } finally {

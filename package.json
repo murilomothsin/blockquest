@@ -11,7 +11,9 @@
     "start": "node --disable-warning=ExperimentalWarning server/index.js",
     "preview": "vite preview",
     "denuncias": "node --disable-warning=ExperimentalWarning scripts/denuncias.js",
-    "test:mobs": "node scripts/test-mobs.mjs"
+    "cargo": "node --disable-warning=ExperimentalWarning scripts/cargo.js",
+    "test:chat": "node scripts/test-chat.mjs",
+    "test:server": "node --disable-warning=ExperimentalWarning scripts/test-server.mjs"
   },
   "engines": {
     "node": ">=22.13"

@@ -118,6 +118,17 @@ button.keycap-btn.listening { background: #f5b82e; animation: pulse .8s infinite
 #chatlog .whisper b { color: #ff8ad8; }
 #chat.open #chatlog div { opacity: 1 !important; }
 #chatlog .pname { pointer-events: auto; cursor: pointer; }
+#chatlog .staff { color: #ffe39a; background: rgba(60,40,0,.55); }
+#chatlog .staff b { color: #ffc94a; }
+#chatlog .announce { color: #fff; background: rgba(150,40,20,.75); font-weight: 700; }
+#chatlog .announce b { color: #ffd65c; }
+.rbadge { display: inline-block; font-size: 10px; font-weight: 900; letter-spacing: .5px; color: #0b0d18; border-radius: 4px; padding: 0 4px; margin-right: 5px; vertical-align: 1px; line-height: 15px; }
+#pbadge { margin-left: 6px; margin-right: 0; }
+#pmenu button.staff { background: #4a3a10; color: #ffe39a; }
+#pmenu button.staff:hover { background: #6a5418; }
+#announce { position: fixed; top: 16%; left: 50%; transform: translate(-50%, -10px); z-index: 55; max-width: 620px; text-align: center; background: rgba(20,14,6,.92); border: 2px solid #f5b82e; border-radius: 14px; padding: 12px 22px; color: #fff; font-size: 20px; font-weight: 800; opacity: 0; pointer-events: none; transition: opacity .4s, transform .4s; }
+#announce small { display: block; font-size: 12px; color: #f5b82e; font-weight: 700; margin-bottom: 4px; }
+#announce.show { opacity: 1; transform: translate(-50%, 0); }
 #chatlog .pname:hover { text-decoration: underline; }
 #pmenu { position: fixed; z-index: 60; background: rgba(14,16,30,.96); border: 2px solid #3a4266; border-radius: 10px; padding: 6px; display: flex; flex-direction: column; gap: 4px; min-width: 150px; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
 #pmenu .pm-title { font-weight: 800; color: #9fe3ff; padding: 2px 6px 4px; border-bottom: 1px solid #3a4266; margin-bottom: 2px; }

@@ -25,8 +25,8 @@ O banco fica em `server/data/blockquest.db` (fora do git). Use `DB_PATH=/caminho
 
 - Ao abrir o jogo aparece a tela de **Entrar / Criar conta**. Também dá para **jogar offline** (progresso no navegador).
 - Usuário: 3–16 caracteres (letras, números, `_`), sem diferenciar maiúsculas. Senha: mínimo 6. Senhas são guardadas com **scrypt** + salt; o login gera um token de sessão (30 dias) salvo no navegador.
-- Ao criar conta, dá para **levar o progresso offline** para a conta nova.
-- O progresso (nível, ouro, inventário, missões, posição) fica **no servidor**, por conta.
+- O progresso (nível, XP, ouro, inventário, equipamento, vida, missões, posição) fica **no servidor**, por conta, e só o servidor muda esses valores. O progresso offline **não** pode ser levado para uma conta (seria uma porta para trapaça).
+- Contas da equipe aparecem com etiqueta colorida em cima da cabeça e no chat: **[ADM]** vermelho, **[MOD]** verde, **[QA]** azul.
 - Online você vê os outros jogadores (nome em cima da cabeça, movimento, golpes, arma, armadura e capacete) e os pontos azuis no minimapa.
 - Se a mesma conta entrar em outro lugar, a sessão antiga é desconectada.
 
@@ -52,23 +52,56 @@ Aperte **Enter** para escrever. A mensagem aparece no chat de todos e num **bal�
 - **Silêncio automático:** 3 palavrões em 1 minuto deixam a pessoa 60 s sem poder escrever.
 - **Nomes ofensivos** são recusados no cadastro.
 - **Denúncias:** a janela tem motivo (ofensa, assédio, spam, trapaça, nome, outro) e um comentário opcional. O servidor anexa as **últimas 20 mensagens originais** do denunciado (antes do filtro), então a prova não pode ser forjada pelo cliente. Limites: 1 denúncia por pessoa a cada 10 min e 10 por hora.
-- Para ver as denúncias: `npm run denuncias` (abertas), `npm run denuncias -- todas`, `npm run denuncias -- resolver <id>`.
+- Para ver as denúncias: `npm run denuncias` (abertas), `npm run denuncias -- todas`, `npm run denuncias -- resolver <id>`. Moderadores também veem no jogo com `/denuncias`.
+
+### Equipe: cargos
+
+| Cargo | Etiqueta | O que pode |
+|---|---|---|
+| Jogador | (nenhuma) | jogar |
+| Tester (QA) | `[QA]` azul | comandos de teste + chat da equipe |
+| Moderador | `[MOD]` verde | mutar, expulsar, banir, ver/resolver denúncias, avisos + chat da equipe |
+| Admin | `[ADM]` vermelho | tudo acima + mudar cargos |
+
+**Criar o primeiro admin** (pelo terminal, com a conta já criada no jogo): `npm run cargo -- SeuNome admin`. `npm run cargo` lista a equipe. Depois disso, admins usam `/cargo nome qa|mod|admin|player` no jogo (vale na hora).
+
+Comandos (digite `/ajuda` no jogo para ver só os do seu cargo):
+
+| Comando | Cargo | O que faz |
+|---|---|---|
+| `/equipe msg` | todos da equipe | chat só da equipe |
+| `/aviso texto` | mod, admin | aviso grande no meio da tela de todos |
+| `/mutar nome minutos [motivo]` · `/desmutar nome` | mod, admin | silêncio no chat |
+| `/expulsar nome [motivo]` | mod, admin | desconecta |
+| `/banir nome horas [motivo]` · `/desbanir nome` | mod, admin | suspende a conta (`0` = permanente); o login mostra o motivo |
+| `/denuncias` · `/resolver id` | mod, admin | denúncias abertas |
+| `/tp x z` · `/tp nome` | QA, admin | teleporta |
+| `/item id [qtd]` · `/itens` · `/ouro n` · `/xp n` · `/nivel n` | QA, admin | dá itens/ouro/XP, define nível |
+| `/curar` · `/imortal` · `/spawn tipo [qtd]` · `/matar` · `/missao n` | QA, admin | ferramentas de teste |
+| `/cargo nome cargo` | admin | muda cargo |
+
+Regras: só se pune quem tem cargo **menor** (moderador não pune moderador nem admin), ninguém muda o próprio cargo, e mensagens da equipe nunca são escondidas pelo `/ignorar`. Clicar no nome de alguém no chat também mostra atalhos da equipe (Mutar 10 min, Expulsar, Ir até). **Toda ação da equipe fica registrada** na tabela `staff_log` (quem, o quê, em quem, quando).
 
 ### Como funciona
 
 ```
 cliente ──HTTP──▶ /api/register | /api/login | /api/me | /api/logout | /api/online
-cliente ◀──WS──▶ /ws   hello(token) → welcome | state (10/s) → snap (10/s) | chat | save | join/leave
-                        hit(ids) → mobs (10/s) | mev (eventos: golpe, morte, pedra, encontro) | hurt | report
+cliente ◀──WS──▶ /ws   hello(token) → welcome(personagem, cargo) | state (10/s) → snap (10/s) | chat | join/leave | role
+                        hit(ids) → mobs (10/s) | mev (eventos: golpe, morte, pedra, encontro)
+                        act(pedido) → fx(personagem + efeitos) | setpos | cmd → sys | report | staff | announce
 ```
 
 **Monstros no servidor (online):** o servidor roda a IA de todos os monstros a 20 Hz (`server/game.js`), então todo mundo vê e enfrenta **os mesmos monstros**. O cliente só diz "acertei o monstro X". O servidor confere a arma, a distância e o tempo entre golpes, e só então **rola o dano**. Golpes de longe ou rápidos demais são ignorados. Quem bateu no monstro nos últimos 30 s **ganha o abate** (ouro, XP, progresso de missão). Cada jogador recebe só os monstros a até 110 m.
 
 A IA é um único código (`src/shared/mobs.js`) que roda no servidor (online) e no navegador (offline). O mapa também é compartilhado (`src/shared/worldData.js`, gerado com a mesma semente), então as colisões e o "mato" batem nos dois lados.
 
-**Ainda confiado ao cliente:** a posição do jogador, o nível (usado no cálculo de dano), o ouro, o inventário e os drops dos baús. Próximo passo anti-trapaça: mover XP, ouro e drops para o servidor.
+**Progresso no servidor:** XP, nível, ouro, inventário, equipamento, vida, missões e baús são do servidor. O cliente só manda **pedidos** (`comprar`, `vender`, `equipar`, `usar poção`, `beber no poço`, `aceitar/entregar missão`, `pegar baú`, `renascer`) e o servidor aplica as regras de `src/shared/progress.js`. Ele confere, por exemplo, se o jogador está perto da loja, do ancião, do poço ou do baú, e se tem ouro. O dano do jogador usa o nível e a arma **do servidor**, e o dano dos monstros, a armadura e a morte (−10% do ouro) também são calculados lá. Offline, as mesmas regras rodam no navegador.
 
-Testes automáticos com o servidor rodando: `npm run test:mobs` e `node scripts/test-chat.mjs`.
+**Posição:** continua vindo do cliente, mas o servidor recusa velocidade impossível (acima de 21 m/s) e devolve o jogador para a última posição válida. Morto não anda. Teleporte só acontece por ordem do servidor (renascer, `/tp`).
+
+O servidor salva os personagens a cada 10 s, ao sair e ao desligar.
+
+Testes automáticos com o servidor rodando: `npm run test:server` (monstros, economia, baús, morte, anti-trapaça, cargos e moderação: 41 checagens) e `npm run test:chat` (filtro e denúncias).
 
 ## Controles (padrão)
 
@@ -109,20 +142,26 @@ Todos os sons são sintetizados com Web Audio (`src/audio.js`), com volume e pan
 
 ```
 server/
-  index.js       HTTP (API + arquivos do build) e WebSocket (presença, snapshots, chat, saves, denúncias)
-  game.js        mundo autoritativo: roda a IA dos monstros, valida golpes, distribui eventos
+  index.js       HTTP (API + arquivos do build) e WebSocket (conexões, chat, denúncias)
+  game.js        mundo autoritativo: monstros, personagens, golpes, pedidos, baús, velocidade, saves
+  commands.js    comandos da equipe (QA/mod/admin)
+  moderation.js  filtro do chat, silêncio, histórico/provas, denúncias, staff_log
   filter.js      filtro de palavrões (chat e nomes)
-  auth.js        contas (scrypt), sessões, validação dos saves
-  db.js          SQLite (node:sqlite): users, sessions, characters, reports
+  auth.js        contas (scrypt), sessões, suspensões, saves
+  db.js          SQLite (node:sqlite): users (+cargo/ban), sessions, characters, reports, staff_log
 scripts/
   dev.js         sobe servidor + Vite
+  cargo.js       define/lista cargos (npm run cargo)
   denuncias.js   lista/resolve denúncias (npm run denuncias)
-  test-*.mjs     testes do servidor (monstros e chat)
+  test-*.mjs     testes do servidor (npm run test:server / test:chat)
 src/
   shared/        código usado pelo navegador E pelo servidor:
+    progress.js    regras do personagem: XP, ouro, loja, equipar, poções, missões, baús, dano, morte
     mobs.js        tipos, spawns, IA, arremesso do golem, encontros selvagens (MobSim)
-    worldData.js   layout do mapa com semente, colisão, zona segura, mato
+    worldData.js   layout do mapa com semente, NPCs, colisão, zona segura, mato
     items.js       catálogo de itens, loja, tabela de drop
+    quests.js      missões
+    roles.js       cargos, permissões e comandos da equipe
   main.js        loop, jogador, câmera, NPCs, mira, itens, integração online
   net/           session.js (login), net.js (WebSocket), remote.js (outros jogadores)
   world.js       desenha o mapa a partir de shared/worldData.js
@@ -130,7 +169,6 @@ src/
   enemies.js     visual dos monstros (MobSim local offline, ou estado do servidor online)
   combat.js      flechas
   loot.js        baús de drop
-  quests.js      missões
   audio.js       sons sintetizados / arquivos opcionais
   ui.js          HUD, loja, inventário, remapeamento, chat, minimapa
   input.js       teclado/mouse com bindings configuráveis
@@ -138,7 +176,6 @@ src/
 
 ## Próximos passos
 
-- XP, ouro e drops validados no servidor (anti-trapaça completo)
 - Grupos (party) com XP compartilhado, e troca de itens entre jogadores
 - Classes (guerreiro / mago / arqueiro) e habilidades
 - Personalização do avatar (cores e acessórios salvos na conta)

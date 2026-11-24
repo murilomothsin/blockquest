@@ -28,6 +28,13 @@ export const HOUSES = [
 ];
 export const LAKE = { x: -45, z: 30, r: 11 };
 export const WELL = { x: 0, z: 0 };
+/** NPCs (posição usada também pelo servidor para checar se o jogador está perto da loja/ancião/poço) */
+export const NPCS = {
+  elder: { name: 'Ancião Bento', x: 4, z: -5 },
+  merchant: { name: 'Mercadora Lia', x: -6, z: 4 },
+};
+export const INTERACT_RANGE = { npc: 6, well: 4.5 };
+export const SPAWN_POINT = [0, 0, 8];
 
 export function onPath(x, z, half = 4) {
   return PATHS.some(([ex, ez]) => {
