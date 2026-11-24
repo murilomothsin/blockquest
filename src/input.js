@@ -10,6 +10,7 @@ export const ACTIONS = [
   { id: 'camLeft', label: 'Girar câmera ←', defaults: ['KeyQ', null] },
   { id: 'camRight', label: 'Girar câmera →', defaults: ['KeyR', null] },
   { id: 'help', label: 'Mostrar controles', defaults: ['KeyH', null] },
+  { id: 'mute', label: 'Som liga/desliga', defaults: ['KeyM', null] },
 ];
 
 export const RESERVED = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape', 'Mouse2'];

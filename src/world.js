@@ -2,6 +2,11 @@ import * as THREE from 'three';
 
 export const WORLD_RADIUS = 140;
 
+/** Zona segura em volta da vila: nada spawna e monstros não entram */
+export const SAFE_ZONE = { x: 0, z: 0, r: 32 };
+/** "Mato alto": ponto com pelo menos minTrees árvores num raio de `radius` metros */
+export const WOODS = { radius: 10, minTrees: 3 };
+
 export const ZONES = [
   { id: 'village', name: 'Vila Pedraverde', x: 0, z: 0, r: 22, color: '#e9d28a' },
   { id: 'forest', name: 'Floresta Sombria', x: -35, z: -35, r: 18, color: '#2f7a2f' },
@@ -119,14 +124,15 @@ export function buildWorld(scene) {
   const leafGeo = new THREE.BoxGeometry(3.2, 3.2, 3.2);
   const pineGeo = new THREE.ConeGeometry(2, 4.5, 6);
   const nearZone = (x, z, pad) => ZONES.some((zn) => Math.hypot(x - zn.x, z - zn.z) < zn.r * (zn.id === 'forest' ? 0.55 : 1) + pad);
-  const onPath = (x, z) => {
+  const onPath = (x, z, half = 4) => {
     const segs = [[-35, -35], [65, -15], [38, 40], [0, -95]];
     return segs.some(([ex, ez]) => {
       const len2 = ex * ex + ez * ez;
       const t = Math.max(0, Math.min(1, (x * ex + z * ez) / len2));
-      return Math.hypot(x - ex * t, z - ez * t) < 4;
+      return Math.hypot(x - ex * t, z - ez * t) < half;
     });
   };
+  const trees = [];
   let placed = 0;
   for (let i = 0; i < 2000 && placed < 260; i++) {
     const a = rand() * Math.PI * 2;
@@ -147,6 +153,7 @@ export function buildWorld(scene) {
     t.position.set(x, 0, z); t.scale.setScalar(sc); t.rotation.y = rand() * 6;
     scene.add(t);
     colliders.push({ x, z, r: 0.7 * sc });
+    trees.push({ x, z, group: t, faded: false });
     placed++;
   }
 
@@ -237,5 +244,49 @@ export function buildWorld(scene) {
     return ZONES.find((zn) => Math.hypot(x - zn.x, z - zn.z) < zn.r + 4) || null;
   }
 
-  return { colliders, resolve, zoneAt, update: (t, dt) => animated.forEach((f) => f(t, dt)) };
+  // ---------- Áreas para encontros selvagens ----------
+  const isSafe = (x, z) => Math.hypot(x - SAFE_ZONE.x, z - SAFE_ZONE.z) < SAFE_ZONE.r;
+  const isRoad = (x, z) => onPath(x, z, 5.5);
+  const treesNear = (x, z, r) => {
+    let n = 0;
+    for (const t of trees) if (Math.abs(t.x - x) < r && Math.abs(t.z - z) < r && Math.hypot(t.x - x, t.z - z) < r) n++;
+    return n;
+  };
+  /** "mato alto": área com árvores, fora da zona segura e da estrada */
+  const isWooded = (x, z) => !isSafe(x, z) && !isRoad(x, z) && treesNear(x, z, WOODS.radius) >= WOODS.minTrees;
+  const isBlocked = (x, z, r = 1) => colliders.some((c) => Math.hypot(x - c.x, z - c.z) < c.r + r) || Math.hypot(x, z) > WORLD_RADIUS - 2;
+
+  // borda da zona segura desenhada no chão
+  const safeRing = new THREE.Mesh(new THREE.RingGeometry(SAFE_ZONE.r - 0.35, SAFE_ZONE.r, 120),
+    new THREE.MeshBasicMaterial({ color: 0xfff3c4, transparent: true, opacity: 0.35, depthWrite: false }));
+  safeRing.rotation.x = -Math.PI / 2;
+  safeRing.position.set(SAFE_ZONE.x, 0.04, SAFE_ZONE.z);
+  scene.add(safeRing);
+
+  /** Deixa semitransparentes as árvores entre a câmera e o jogador (senão a copa tampa a visão) */
+  function fadeOccluders(cam, target) {
+    const sx = target.x - cam.x, sz = target.z - cam.z;
+    const len2 = sx * sx + sz * sz || 1;
+    for (const t of trees) {
+      if (Math.abs(t.x - target.x) > 35 || Math.abs(t.z - target.z) > 35) { if (t.faded) setFade(t, false); continue; }
+      const k = Math.max(0, Math.min(1, ((t.x - cam.x) * sx + (t.z - cam.z) * sz) / len2));
+      const d = Math.hypot(cam.x + sx * k - t.x, cam.z + sz * k - t.z);
+      const block = d < 2.6 * t.group.scale.x && k < 0.97;
+      if (block !== t.faded) setFade(t, block);
+    }
+  }
+  function setFade(t, on) {
+    t.faded = on;
+    t.group.traverse((o) => {
+      if (!o.isMesh) return;
+      o.material.transparent = on;
+      o.material.opacity = on ? 0.22 : 1;
+      o.material.depthWrite = !on;
+    });
+  }
+
+  return {
+    colliders, trees, resolve, zoneAt, isSafe, isRoad, isWooded, isBlocked, fadeOccluders,
+    update: (t, dt) => animated.forEach((f) => f(t, dt)),
+  };
 }

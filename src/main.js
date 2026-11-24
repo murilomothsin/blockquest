@@ -8,6 +8,7 @@ import { Input, keyLabel } from './input.js';
 import { UI } from './ui.js';
 import { Projectiles } from './combat.js';
 import { Loot } from './loot.js';
+import { Sound } from './audio.js';
 
 // ---------- Render ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -37,11 +38,17 @@ sun.shadow.bias = -0.0005;
 scene.add(sun, sun.target);
 
 const world = buildWorld(scene);
-const enemies = new EnemyManager(scene, world);
+const sound = new Sound();
+const sfx = (name, pos = null, vol = 1) => sound.play(name, pos, vol);
+const enemies = new EnemyManager(scene, world, sfx);
 const input = new Input(renderer.domElement);
-const ui = new UI(input);
+const ui = new UI(input, sound);
 const loot = new Loot(scene);
 const projectiles = new Projectiles(scene, world, enemies, (hit) => reportHits([hit]));
+projectiles.onWorld = (pos) => sfx('arrowHit', pos, 0.7);
+enemies.onWild = (e) => ui.log(`⚠️ Um ${e.def.name.toLowerCase()} saltou do meio das árvores!`, 'bad');
+// clique em qualquer botão da interface
+document.addEventListener('click', (e) => { if (e.target.closest?.('button')) sfx('ui'); });
 
 // ---------- Save ----------
 const SAVE_KEY = 'blockquest-save-v2';
@@ -110,6 +117,7 @@ function gainXp(n) {
     player.hp = player.maxHp;
     ui.float(headPos(player.pos, 3.8), 'LEVEL UP!', '#f5b82e', 30);
     ui.log(`Você subiu para o nível ${player.level}! Vida máxima: ${player.maxHp}`, 'good');
+    sfx('levelUp');
   }
   save();
 }
@@ -131,10 +139,11 @@ function equip(id) {
 function useItem(id) {
   const it = ITEMS[id];
   if (it.kind !== 'consumable') return;
-  if (!player.inv[id]) return ui.log(`Sem ${it.name}! Compre com a Mercadora Lia.`, 'bad');
+  if (!player.inv[id]) { sfx('deny'); return ui.log(`Sem ${it.name}! Compre com a Mercadora Lia.`, 'bad'); }
   if (player.dead) return;
-  if (player.hp >= player.maxHp) return ui.log('Vida já está cheia.', 'info');
+  if (player.hp >= player.maxHp) { sfx('deny'); return ui.log('Vida já está cheia.', 'info'); }
   removeItem(id);
+  sfx('potion');
   const heal = Math.round(player.maxHp * it.heal);
   player.hp = Math.min(player.maxHp, player.hp + heal);
   ui.float(headPos(player.pos), `+${heal}`, '#7dff7d', 22);
@@ -142,9 +151,10 @@ function useItem(id) {
 }
 function buy(id) {
   const it = ITEMS[id];
-  if (player.gold < it.price) return;
+  if (player.gold < it.price) { sfx('deny'); return; }
   player.gold -= it.price;
   addItem(id);
+  sfx('coin');
   ui.log(`Comprou ${it.icon} ${it.name}.`, 'gold');
   if (it.kind === 'weapon') equip(id);
   save();
@@ -155,6 +165,7 @@ function sell(id) {
   if (id === player.equipped && player.inv[id] <= 1) return;
   removeItem(id);
   player.gold += it.sell;
+  sfx('coin');
   ui.log(`Vendeu ${it.icon} ${it.name} por ${it.sell} ouro.`, 'gold');
   save();
 }
@@ -201,6 +212,7 @@ function talk(npc) {
     return ui.dialog(`${npc.name} — ${def.title}`, def.intro, [{
       label: 'Aceitar missão', onClick: () => {
         q.status = 'active'; q.progress = 0;
+        sfx('quest');
         ui.log(`Missão aceita: ${def.title}`, 'info'); ui.closeDialog(); save();
       },
     }]);
@@ -210,6 +222,7 @@ function talk(npc) {
     return ui.dialog(npc.name, def.doneText, [{
       label: 'Receber recompensa', onClick: () => {
         const r = def.reward;
+        sfx('quest'); sfx('coin');
         player.gold += r.gold || 0;
         const got = [];
         for (const [id, n] of Object.entries(r.items || {})) { addItem(id, n); got.push(`${n}x ${ITEMS[id].name}`); }
@@ -283,6 +296,7 @@ function currentTarget() {
 // ---------- Combate ----------
 function reportHits(hits) {
   for (const hh of hits) {
+    sfx(hh.crit ? 'crit' : 'hit', hh.enemy.pos);
     ui.float(headPos(hh.enemy.pos, hh.enemy.def.height + 0.4), hh.crit ? `${hh.dmg}!` : `${hh.dmg}`, hh.crit ? '#ffd84a' : '#ffffff', hh.crit ? 28 : 20);
     if (hh.killed) onKill(hh.enemy);
   }
@@ -299,10 +313,12 @@ function attack() {
   if (w.style === 'ranged') {
     setTimeout(() => {
       if (player.dead) return;
+      sfx('bow');
       const from = new THREE.Vector3(player.pos.x, player.pos.y + 1.9, player.pos.z).addScaledVector(facing(), 0.7);
       projectiles.fire(from, alive(tgt) ? tgt : null, facing(), w.range, rollDamage);
     }, 160);
   } else {
+    sfx('swing');
     setTimeout(() => {
       if (player.dead) return;
       reportHits(enemies.hitArc(player.pos, facing(), ATTACK.melee.range, rollDamage));
@@ -314,12 +330,14 @@ function onKill(e) {
   const g = e.def.gold[0] + Math.floor(Math.random() * (e.def.gold[1] - e.def.gold[0] + 1));
   player.gold += g;
   player.kills++;
+  sfx('coin', e.pos);
   ui.float(headPos(e.pos, e.def.height + 1), `+${g} 🪙`, '#ffd65c', 16);
   ui.log(`${e.def.name} derrotado! +${g} ouro`, 'gold');
   if (lockTarget === e) lockTarget = null;
   // a cada 5 abates cai um item; chefe sempre deixa uma arma rara
   if (player.kills % 5 === 0) {
     loot.drop(rollDrop(), e.pos);
+    sfx('drop', e.pos);
     ui.log('🎁 Um item caiu! Encoste no baú para pegar.', 'good');
   }
   if (e.def.boss) {
@@ -329,7 +347,7 @@ function onKill(e) {
   const q = player.quest, def = QUESTS[q.idx];
   if (q.status === 'active' && def.target === e.type) {
     q.progress++;
-    if (q.progress >= def.count) { q.status = 'complete'; ui.log(`Missão concluída! Volte ao ${elder.name}.`, 'info'); }
+    if (q.progress >= def.count) { q.status = 'complete'; sfx('quest'); ui.log(`Missão concluída! Volte ao ${elder.name}.`, 'info'); }
   }
   gainXp(e.def.xp);
 }
@@ -337,6 +355,7 @@ function onKill(e) {
 function onPickup(id) {
   const it = ITEMS[id];
   addItem(id);
+  sfx('pickup');
   ui.float(headPos(player.pos, 3.4), `${it.icon} ${it.name}`, it.kind === 'weapon' ? '#d9b3ff' : '#b8ffb0', 18);
   ui.log(`Pegou ${it.icon} ${it.name}!${it.kind === 'weapon' ? ` Abra o inventário [${keyLabel(input.bindings.inventory.find(Boolean))}] para equipar.` : ''}`, 'good');
   ui.refresh();
@@ -348,11 +367,13 @@ function onPlayerHit(dmg, e) {
   const real = Math.max(1, Math.round(dmg * (0.85 + Math.random() * 0.3)));
   player.hp -= real;
   player.lastHurt = player.t;
+  sfx('playerHurt');
   flash(hero, 0x660000);
   setTimeout(() => flash(hero, 0x000000), 120);
   ui.float(headPos(player.pos), `-${real}`, '#ff5d5d', 22);
   if (player.hp <= 0) {
     player.hp = 0; player.dead = true;
+    sfx('playerDie');
     lockTarget = null;
     const lost = Math.floor(player.gold * 0.1);
     player.gold -= lost;
@@ -374,6 +395,7 @@ const cam = { yaw: 0, pitch: 0.38, dist: 13 };
 const clock = new THREE.Clock();
 let saveTimer = 0;
 let currentZone = null;
+let inSafe = null;
 
 function update(dt) {
   player.t += dt;
@@ -395,6 +417,11 @@ function update(dt) {
     else lockTarget = null;
   }
   if (input.hit('help')) ui.toggleHelp();
+  if (input.hit('mute')) {
+    const m = sound.toggleMute();
+    ui.log(m ? '🔇 Som desligado' : '🔊 Som ligado', 'info');
+    ui.renderHelp();
+  }
   if (input.hit('inventory') && !player.dead && !ui.dialogOpen) ui.toggleModal('inventory');
 
   let moveAmount = 0;
@@ -417,7 +444,7 @@ function update(dt) {
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       player.rotY += diff * Math.min(1, dt * 14);
     }
-    if (input.hit('jump') && player.onGround) { player.vy = 10; player.onGround = false; }
+    if (input.hit('jump') && player.onGround) { player.vy = 10; player.onGround = false; sfx('jump'); }
 
     // clicar num inimigo trava o alvo
     if (input.click) {
@@ -494,6 +521,11 @@ function update(dt) {
   const z = world.zoneAt(player.pos.x, player.pos.z);
   if (z && z !== currentZone) ui.log(`📍 ${z.name}`, 'info');
   currentZone = z;
+  const safe = world.isSafe(player.pos.x, player.pos.z);
+  if (safe !== inSafe) {
+    if (inSafe !== null) ui.log(safe ? '🛡️ Zona segura: monstros não entram aqui' : '⚠️ Saindo da zona segura', safe ? 'good' : 'bad');
+    inSafe = safe;
+  }
 
   const boss = enemies.list.find((e) => e.def.boss && e.state === 'chase');
   ui.boss(boss ? boss.def.name : null, boss ? boss.hp / boss.def.hp : 0);
@@ -507,6 +539,8 @@ function update(dt) {
   );
   camera.position.y = Math.max(0.5, camera.position.y);
   camera.lookAt(camTarget);
+  world.fadeOccluders(camera.position, player.pos);
+  sound.setListener(player.pos, new THREE.Vector3(Math.cos(cam.yaw), 0, -Math.sin(cam.yaw)));
   sun.position.set(player.pos.x + 30, 60, player.pos.z + 20);
   sun.target.position.copy(player.pos);
 
@@ -541,4 +575,4 @@ ui.log('Bem-vindo a BlockQuest! Fale com o Ancião Bento.', 'info');
 frame();
 
 // atalho de debug no console
-window.game = { player, enemies, loot, ui, equip, addItem, projectiles, world, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };
+window.game = { player, enemies, loot, ui, equip, addItem, projectiles, world, sound, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };

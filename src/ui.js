@@ -20,8 +20,9 @@ const h = (tag, attrs = {}, ...kids) => {
 };
 
 export class UI {
-  constructor(input) {
+  constructor(input, sound = null) {
     this.input = input;
+    this.sound = sound;
     this.floats = [];
     this.dialogOpen = false;
     this.modal = null; // 'shop' | 'inventory' | 'keys'
@@ -243,6 +244,16 @@ export class UI {
         h('button', { class: 'mini secondary', title: `Ocultar [${helpKey}]`, onclick: () => this.toggleHelp() }, '✕')),
       h('div', { class: 'cgrid' }, rows.map(([label, keys]) => h('div', { class: 'crow' }, h('span', {}, label), h('span', { class: 'ckeys' }, keys.length ? keys : h('kbd', { class: 'none' }, '—'))))),
     );
+    if (this.sound) {
+      const s = this.sound;
+      const slider = h('input', { type: 'range', min: '0', max: '1', step: '0.05', class: 'vol' });
+      slider.value = String(s.volume);
+      slider.oninput = () => { s.setVolume(+slider.value); if (s.muted && +slider.value > 0) { s.setMuted(false); this.renderHelp(); } };
+      slider.onchange = () => slider.blur(); // devolve o teclado pro jogo
+      el.append(h('div', { class: 'cvol' },
+        h('button', { class: 'mini secondary', title: 'Liga/desliga o som', onclick: () => { s.toggleMute(); this.renderHelp(); } }, s.muted ? '🔇' : '🔊'),
+        h('span', {}, 'Volume'), slider));
+    }
   }
 
   toggleHelp() {

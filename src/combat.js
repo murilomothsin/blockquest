@@ -56,6 +56,7 @@ export class Projectiles {
       }
       if (!done && pos.y < 4) {
         done = this.world.colliders.some((c) => Math.hypot(pos.x - c.x, pos.z - c.z) < c.r);
+        if (done) this.onWorld?.(pos.clone());
       }
       if (done) { this.scene.remove(p.mesh); this.list.splice(i, 1); }
     }

@@ -60,6 +60,8 @@ kbd.none { opacity: .4; }
 button.mini { padding: 4px 10px; font-size: 12px; box-shadow: 0 2px 0 #1d4ed8; }
 button.mini.secondary { box-shadow: 0 2px 0 #333; }
 button.pill { font-size: 13px; padding: 7px 12px; background: rgba(15,20,35,.8); box-shadow: none; border: 2px solid rgba(255,255,255,.2); }
+.cvol { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.12); }
+.cvol .vol { flex: 1; accent-color: #f5b82e; }
 
 /* ---------- Janelas ---------- */
 #modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; }
