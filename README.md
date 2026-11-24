@@ -27,8 +27,21 @@ O banco fica em `server/data/blockquest.db` (fora do git). Use `DB_PATH=/caminho
 - Usuário: 3–16 caracteres (letras, números, `_`), sem diferenciar maiúsculas. Senha: mínimo 6. Senhas são guardadas com **scrypt** + salt; o login gera um token de sessão (30 dias) salvo no navegador.
 - Ao criar conta, dá para **levar o progresso offline** para a conta nova.
 - O progresso (nível, ouro, inventário, missões, posição) fica **no servidor**, por conta.
-- Online você vê os outros jogadores (nome em cima da cabeça, movimento, golpes, arma equipada), pontos azuis no minimapa e o **chat (Enter)**.
+- Online você vê os outros jogadores (nome em cima da cabeça, movimento, golpes, arma, armadura e capacete) e os pontos azuis no minimapa.
 - Se a mesma conta entrar em outro lugar, a sessão antiga é desconectada.
+
+### Chat
+
+Aperte **Enter** para escrever. A mensagem aparece no chat de todos e num **balão em cima da cabeça** de quem falou.
+
+| Comando | O que faz |
+|---|---|
+| `/w nome mensagem` | Mensagem privada (sussurro). Só você e a pessoa veem |
+| `/r mensagem` | Responde o último sussurro recebido |
+| `/ignorar nome` | Para de mostrar as mensagens dessa pessoa (salvo no navegador) |
+| `/designorar nome` | Volta a mostrar |
+| `/online` | Lista quem está online |
+| `/ajuda` | Lista os comandos |
 
 ### Como funciona
 
@@ -66,7 +79,8 @@ Todos os controles de ação podem ser remapeados no jogo (painel **Controles �
 - **Zona segura:** círculo de 32 m em volta da vila (marcado no chão). Monstros não entram e nada aparece ali.
 - **Encontros selvagens (estilo Pokémon):** andando no meio das árvores, fora da vila e das estradas, de vez em quando um goblin pula do mato (com "!"). No máximo 2 ao mesmo tempo, com intervalo mínimo de 15 s. Configurável em `WILD` (`src/enemies.js`).
 - **Golem Antigo:** se você fica a mais de 8 m, ele arremessa pedras. Uma área vermelha marca onde a pedra vai cair, e dá pra desviar.
-- **Drops:** a cada 5 inimigos derrotados cai um baú (poção ou arma). O chefe sempre deixa uma arma rara.
+- **Drops:** a cada 5 inimigos derrotados cai um baú (poção, arma ou armadura). O chefe sempre deixa um equipamento raro.
+- **Armaduras e capacetes:** 5 tiers com as mesmas cores das armas (couro, ferro, aço, rúnico e élfico, este só caindo de monstros). A defesa da armadura e do capacete soma, e cada ponto reduz o dano em %, com retorno decrescente: `def / (def + 25)`. Ferro completo (10) bloqueia 29%; rúnico completo (27), 52%. A primeira missão dá uma Armadura de Couro.
 - **Limite do mapa:** círculo de 140 m, cercado por montanhas.
 
 ## Sons

@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { buildWorld, makeLabel } from './world.js';
-import { createCharacter, animateCharacter, flash } from './character.js';
+import { createCharacter, animateCharacter, flash, setGear } from './character.js';
 import { EnemyManager } from './enemies.js';
 import { QUESTS } from './quests.js';
-import { ITEMS, ATTACK, rollDrop } from './items.js';
+import { ITEMS, ATTACK, SLOTS, rollDrop, damageReduction } from './items.js';
 import { Input, keyLabel } from './input.js';
 import { UI } from './ui.js';
 import { Projectiles } from './combat.js';
@@ -12,6 +12,7 @@ import { Sound } from './audio.js';
 import { startSession, logoutSession } from './net/session.js';
 import { Net } from './net/net.js';
 import { RemotePlayers } from './net/remote.js';
+import { Bubbles } from './net/bubble.js';
 
 // ---------- Render ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -62,7 +63,7 @@ let remote = null; // outros jogadores
 const SAVE_KEY = 'blockquest-save-v2';
 const DEFAULTS = {
   level: 1, xp: 0, gold: 10, maxHp: 100, hp: 100, kills: 0,
-  inv: { potion: 3, wood_sword: 1 }, equipped: 'wood_sword',
+  inv: { potion: 3, wood_sword: 1 }, equipped: 'wood_sword', armor: null, helmet: null,
   quest: { idx: 0, status: 'available', progress: 0 }, pos: [0, 0, 8],
 };
 function load() {
@@ -79,12 +80,14 @@ function load() {
     }
     const merged = { ...structuredClone(DEFAULTS), ...(s || {}) };
     if (!ITEMS[merged.equipped]) merged.equipped = 'wood_sword';
+    // equipamento que não existe mais ou não está no inventário volta a ficar vazio
+    for (const slot of ['armor', 'helmet']) if (!ITEMS[merged[slot]] || !merged.inv[merged[slot]]) merged[slot] = null;
     return merged;
   } catch { return structuredClone(DEFAULTS); }
 }
 function save() {
-  const { level, xp, gold, maxHp, hp, kills, inv, equipped, quest } = player;
-  const data = { level, xp, gold, maxHp, hp: Math.ceil(hp), kills, inv, equipped, quest, pos: [player.pos.x, 0, player.pos.z] };
+  const { level, xp, gold, maxHp, hp, kills, inv, equipped, armor, helmet, quest } = player;
+  const data = { level, xp, gold, maxHp, hp: Math.ceil(hp), kills, inv, equipped, armor, helmet, quest, pos: [player.pos.x, 0, player.pos.z] };
   if (net) net.save(data);
   else localStorage.setItem(SAVE_KEY, JSON.stringify(data));
 }
@@ -106,8 +109,13 @@ function refreshWeapon() {
   hero.sword.visible = w.style === 'melee';
   hero.bow.visible = w.style === 'ranged';
   (w.style === 'melee' ? hero.sword.userData.blade : hero.bow.userData.limb).material.color.setHex(w.color);
+  setGear(hero, { armorColor: ITEMS[player.armor]?.color ?? null, helmetColor: ITEMS[player.helmet]?.color ?? null });
 }
 refreshWeapon();
+
+/** defesa total do equipamento e a % de dano que ela bloqueia */
+const defense = () => (ITEMS[player.armor]?.def || 0) + (ITEMS[player.helmet]?.def || 0);
+const isEquipped = (id) => id === player.equipped || id === player.armor || id === player.helmet;
 
 const xpToNext = (l) => Math.floor(50 * Math.pow(l, 1.5));
 const facing = () => new THREE.Vector3(Math.sin(player.rotY), 0, Math.cos(player.rotY));
@@ -143,11 +151,23 @@ function removeItem(id, n = 1) {
   if (player.inv[id] <= 0) delete player.inv[id];
 }
 function equip(id) {
-  if (!player.inv[id] || ITEMS[id].kind !== 'weapon') return;
-  player.equipped = id;
+  const it = ITEMS[id];
+  const slot = it && SLOTS[it.kind];
+  if (!player.inv[id] || !slot) return;
+  player[slot] = id;
   refreshWeapon();
-  lockTarget = null;
-  ui.log(`Equipou ${ITEMS[id].icon} ${ITEMS[id].name}.`, 'info');
+  if (it.kind === 'weapon') lockTarget = null;
+  sfx(it.kind === 'weapon' ? 'ui' : 'equip');
+  ui.log(`Equipou ${it.icon} ${it.name}.`, 'info');
+  save();
+}
+/** tira armadura/capacete (a arma não: sempre tem uma) */
+function unequip(slot) {
+  if (slot !== 'armor' && slot !== 'helmet') return;
+  const it = ITEMS[player[slot]];
+  player[slot] = null;
+  refreshWeapon();
+  if (it) ui.log(`Removeu ${it.icon} ${it.name}.`, 'info');
   save();
 }
 function useItem(id) {
@@ -170,20 +190,20 @@ function buy(id) {
   addItem(id);
   sfx('coin');
   ui.log(`Comprou ${it.icon} ${it.name}.`, 'gold');
-  if (it.kind === 'weapon') equip(id);
+  if (SLOTS[it.kind]) equip(id);
   save();
 }
 function sell(id) {
   const it = ITEMS[id];
   if (!player.inv[id]) return;
-  if (id === player.equipped && player.inv[id] <= 1) return;
+  if (isEquipped(id) && player.inv[id] <= 1) return;
   removeItem(id);
   player.gold += it.sell;
   sfx('coin');
   ui.log(`Vendeu ${it.icon} ${it.name} por ${it.sell} ouro.`, 'gold');
   save();
 }
-ui.setGame({ player, buy, sell, use: useItem, equip });
+ui.setGame({ player, buy, sell, use: useItem, equip, unequip, isEquipped, defense });
 
 // ---------- NPCs ----------
 const npcs = [
@@ -244,6 +264,7 @@ function talk(npc) {
         for (const id of Object.keys(r.items || {})) {
           const it = ITEMS[id];
           if (it.kind === 'weapon' && it.style === weapon().style && it.bonus > weapon().bonus) equip(id);
+          if ((it.kind === 'armor' || it.kind === 'helmet') && it.def > (ITEMS[player[it.kind]]?.def || 0)) equip(id);
         }
         q.idx++; q.progress = 0;
         q.status = q.idx < QUESTS.length ? 'available' : 'done';
@@ -371,15 +392,17 @@ function onPickup(id) {
   const it = ITEMS[id];
   addItem(id);
   sfx('pickup');
-  ui.float(headPos(player.pos, 3.4), `${it.icon} ${it.name}`, it.kind === 'weapon' ? '#d9b3ff' : '#b8ffb0', 18);
-  ui.log(`Pegou ${it.icon} ${it.name}!${it.kind === 'weapon' ? ` Abra o inventário [${keyLabel(input.bindings.inventory.find(Boolean))}] para equipar.` : ''}`, 'good');
+  const gearDrop = !!SLOTS[it.kind];
+  ui.float(headPos(player.pos, 3.4), `${it.icon} ${it.name}`, gearDrop ? '#d9b3ff' : '#b8ffb0', 18);
+  ui.log(`Pegou ${it.icon} ${it.name}!${gearDrop ? ` Abra o inventário [${keyLabel(input.bindings.inventory.find(Boolean))}] para equipar.` : ''}`, 'good');
   ui.refresh();
   save();
 }
 
 function onPlayerHit(dmg, e) {
   if (player.dead) return;
-  const real = Math.max(1, Math.round(dmg * (0.85 + Math.random() * 0.3)));
+  // armadura + capacete reduzem o dano em % (com retorno decrescente)
+  const real = Math.max(1, Math.round(dmg * (0.85 + Math.random() * 0.3) * (1 - damageReduction(defense()))));
   player.hp -= real;
   player.lastHurt = player.t;
   sfx('playerHurt');
@@ -416,6 +439,8 @@ function drinkFromWell() {
 }
 
 // ---------- Multiplayer ----------
+const bubbles = new Bubbles(scene);
+let sendChat = null;
 if (session.online) {
   ui.setAccount(session.user.username, true);
   ui.netStatus('🟡 Conectando…');
@@ -432,7 +457,62 @@ if (session.online) {
   net.on('join', (m) => { remote.add(m); ui.netStatus(onlineText()); ui.chatMsg(null, `${m.name} entrou no jogo.`, 'sys'); sfx('ui'); });
   net.on('leave', (m) => { remote.remove(m.id); ui.netStatus(onlineText()); ui.chatMsg(null, `${m.name} saiu.`, 'sys'); });
   net.on('snap', (m) => remote.snapshot(m.players, net.id));
-  net.on('chat', (m) => { ui.chatMsg(m.from, m.text, m.id === net.id ? 'me' : ''); if (m.id !== net.id) sfx('ui'); });
+
+  // ---------- Chat: geral (todos + balão na cabeça), sussurro (/w), ignorar ----------
+  const IGNORE_KEY = 'blockquest-ignored';
+  const ignored = new Set(JSON.parse(localStorage.getItem(IGNORE_KEY) || '[]'));
+  const saveIgnored = () => localStorage.setItem(IGNORE_KEY, JSON.stringify([...ignored]));
+  let lastWhisperFrom = null;
+  const anchorFor = (id) => (id === net.id ? hero.root : remote.map.get(id)?.char.root);
+
+  net.on('chat', (m) => {
+    if (ignored.has(m.from.toLowerCase())) return;
+    ui.chatMsg(m.from, m.text, m.id === net.id ? 'me' : '');
+    const anchor = anchorFor(m.id);
+    if (anchor) bubbles.say(m.id, anchor, m.text);
+    if (m.id !== net.id) sfx('ui');
+  });
+  net.on('whisper', (m) => {
+    const mine = m.id === net.id;
+    if (!mine && ignored.has(m.from.toLowerCase())) return;
+    if (!mine) lastWhisperFrom = m.from;
+    ui.chatMsg(mine ? `[Para ${m.to}]` : `[De ${m.from}]`, m.text, 'whisper');
+    const anchor = anchorFor(m.id); // só quem participa vê o balão do sussurro
+    if (anchor) bubbles.say(m.id, anchor, m.text, { whisper: true });
+    if (!mine) sfx('pickup');
+  });
+  net.on('sys', (m) => ui.chatMsg(null, m.text, 'sys'));
+
+  sendChat = (raw) => {
+    const text = raw.trim();
+    const [cmd, ...rest] = text.split(' ');
+    const arg = rest.join(' ').trim();
+    switch (cmd.toLowerCase()) {
+      case '/w': case '/s': case '/sussurrar': {
+        const [to, ...msg] = rest;
+        if (!to || !msg.length) return ui.chatMsg(null, 'Use: /w nome mensagem', 'sys');
+        return net.chat(msg.join(' '), to);
+      }
+      case '/r': // responder o último sussurro
+        if (!lastWhisperFrom) return ui.chatMsg(null, 'Ninguém sussurrou pra você ainda.', 'sys');
+        if (!arg) return ui.chatMsg(null, 'Use: /r mensagem', 'sys');
+        return net.chat(arg, lastWhisperFrom);
+      case '/ignorar':
+        if (!arg) return ui.chatMsg(null, `Ignorados: ${[...ignored].join(', ') || 'ninguém'}`, 'sys');
+        ignored.add(arg.toLowerCase()); saveIgnored();
+        return ui.chatMsg(null, `Você não vai mais ver mensagens de ${arg}.`, 'sys');
+      case '/designorar':
+        ignored.delete(arg.toLowerCase()); saveIgnored();
+        return ui.chatMsg(null, `${arg} voltou a aparecer no seu chat.`, 'sys');
+      case '/online':
+        return ui.chatMsg(null, `Online: ${[net.id ? session.user.username : null, ...remote.list().map((p) => p.name)].filter(Boolean).join(', ')}`, 'sys');
+      case '/ajuda': case '/?':
+        return ui.chatMsg(null, 'Comandos: /w nome msg (sussurrar) · /r msg (responder) · /ignorar nome · /designorar nome · /online', 'sys');
+      default:
+        if (cmd.startsWith('/')) return ui.chatMsg(null, 'Comando desconhecido. Digite /ajuda', 'sys');
+        return net.chat(text);
+    }
+  };
   net.on('kicked', (m) => { ui.netStatus('🔴 Desconectado'); ui.chatMsg(null, m.message, 'sys'); ui.log(m.message, 'bad'); });
   net.on('error', (m) => { if (m.code === 'auth') logoutSession(null); });
   net.on('disconnect', (e) => {
@@ -481,7 +561,7 @@ function update(dt) {
     ui.renderHelp();
   }
   if (input.hit('inventory') && !player.dead && !ui.dialogOpen) ui.toggleModal('inventory');
-  if (net && input.tapped('Enter') && !ui.isBlocking()) ui.openChat((text) => net.chat(text));
+  if (net && input.tapped('Enter') && !ui.isBlocking()) ui.openChat((text) => sendChat(text));
 
   let moveAmount = 0;
   const canAct = !player.dead && !ui.isBlocking();
@@ -565,11 +645,12 @@ function update(dt) {
   if (net) {
     net.sendState({
       x: +player.pos.x.toFixed(2), y: +player.pos.y.toFixed(2), z: +player.pos.z.toFixed(2), r: +player.rotY.toFixed(3),
-      m: moveAmount, air: !player.onGround, d: player.dead, s: player.attackSeq, w: player.equipped,
+      m: moveAmount, air: !player.onGround, d: player.dead, s: player.attackSeq, w: player.equipped, a: player.armor || '', hm: player.helmet || '',
       hp: Math.ceil(player.hp), mhp: player.maxHp, lv: player.level,
     });
     remote.update(dt);
   }
+  bubbles.update(dt);
 
   // alvo: anel vermelho = travado, amarelo = mira automática do arco
   if (lockTarget && (!alive(lockTarget) || distXZ(lockTarget.pos, player.pos) > 40)) lockTarget = null;
@@ -646,4 +727,4 @@ ui.log('Bem-vindo a BlockQuest! Fale com o Ancião Bento.', 'info');
 frame();
 
 // atalho de debug no console
-window.game = { player, enemies, loot, ui, equip, addItem, projectiles, world, sound, session, get net() { return net; }, get remote() { return remote; }, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };
+window.game = { player, enemies, loot, ui, equip, unequip, defense, onPlayerHit, addItem, projectiles, world, sound, session, get net() { return net; }, get remote() { return remote; }, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };

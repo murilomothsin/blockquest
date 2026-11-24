@@ -46,6 +46,7 @@ export function createCharacter({
   const head = box(1.2 * s, 1.2 * s, 1.2 * s, skin);
   head.position.y = 4.6 * s;
   body.add(head);
+  const hairParts = [];
 
   const eyeMat = new THREE.MeshBasicMaterial({ color: eyes });
   for (const x of [-0.25, 0.25]) {
@@ -64,7 +65,51 @@ export function createCharacter({
     const back = box(1.3 * s, 0.8 * s, 0.3 * s, hair);
     back.position.set(0, 0.2 * s, -0.55 * s);
     head.add(back);
+    hairParts.push(top, back);
   }
+
+  // ---------- Equipamento visual (escondido até equipar) ----------
+  // Armadura: peitoral + ombreiras + cinto. Cor principal = item, detalhes num tom mais escuro.
+  const armor = new THREE.Group();
+  armor.visible = false;
+  const chest = box(2.2 * s, 2.05 * s, 1.25 * s, 0xffffff);
+  chest.position.y = 3.05 * s;
+  const chestPlate = box(1.4 * s, 1.1 * s, 0.1 * s, 0xffffff); // placa frontal em relevo
+  chestPlate.position.set(0, 3.35 * s, 0.66 * s);
+  const belt = box(2.25 * s, 0.3 * s, 1.3 * s, 0xffffff);
+  belt.position.y = 2.15 * s;
+  armor.add(chest, chestPlate, belt);
+  body.add(armor);
+  const pads = [armL, armR].map((arm) => {
+    const pad = box(1.3 * s, 0.55 * s, 1.3 * s, 0xffffff);
+    pad.position.y = -0.15 * s;
+    pad.visible = false;
+    arm.add(pad);
+    return pad;
+  });
+
+  // Capacete: topo + laterais + nuca (rosto livre) + crista
+  const helmet = new THREE.Group();
+  helmet.visible = false;
+  const cap = box(1.4 * s, 0.5 * s, 1.4 * s, 0xffffff);
+  cap.position.y = 0.45 * s;
+  const sideL = box(0.14 * s, 1.0 * s, 1.4 * s, 0xffffff);
+  sideL.position.set(-0.66 * s, 0.05 * s, 0);
+  const sideR = sideL.clone(); sideR.material = sideL.material; sideR.position.x = 0.66 * s;
+  const nape = box(1.4 * s, 1.0 * s, 0.14 * s, 0xffffff);
+  nape.position.set(0, 0.05 * s, -0.66 * s);
+  const brow = box(1.42 * s, 0.16 * s, 0.16 * s, 0xffffff);
+  brow.position.set(0, 0.28 * s, 0.66 * s);
+  const crest = box(0.18 * s, 0.35 * s, 1.1 * s, 0xffffff);
+  crest.position.y = 0.85 * s;
+  helmet.add(cap, sideL, sideR, nape, brow, crest);
+  head.add(helmet);
+
+  const gear = {
+    armor, helmet, pads, hairParts,
+    main: [chest, belt, ...pads, cap, sideL, sideR, nape].map((m) => m.material),
+    trim: [chestPlate, brow, crest].map((m) => m.material),
+  };
 
   let sword = null;
   if (weapon) {
@@ -100,7 +145,31 @@ export function createCharacter({
   const materials = [];
   root.traverse((o) => { if (o.isMesh && o.material.emissive) materials.push(o.material); });
 
-  return { root, body, legL, legR, armL, armR, head, sword, bow: bowMesh, materials, height: 5.2 * s };
+  return { root, body, legL, legR, armL, armR, head, sword, bow: bowMesh, gear, materials, height: 5.2 * s };
+}
+
+const tmpColor = new THREE.Color();
+/**
+ * Mostra/esconde armadura e capacete. armorColor/helmetColor = cor do item ou null (sem item).
+ * Os materiais são exclusivos de cada personagem, então dá pra pintar direto.
+ */
+export function setGear(c, { armorColor = null, helmetColor = null } = {}) {
+  const g = c.gear;
+  if (!g) return;
+  g.armor.visible = armorColor != null;
+  for (const p of g.pads) p.visible = armorColor != null;
+  g.helmet.visible = helmetColor != null;
+  for (const h of g.hairParts) h.visible = helmetColor == null; // capacete esconde o cabelo
+  const paint = (meshes, color, k) => {
+    if (color == null) return;
+    for (const m of meshes) m.color.copy(tmpColor.setHex(color)).multiplyScalar(k);
+  };
+  // peitoral/ombreiras/cinto: [chest, belt, padL, padR] | capacete: [cap, sideL, sideR, nape]
+  paint(g.main.slice(0, 4), armorColor, 1);
+  paint([g.main[1]], armorColor, 0.6); // cinto mais escuro
+  paint([g.trim[0]], armorColor, 0.75);
+  paint(g.main.slice(4), helmetColor, 1);
+  paint(g.trim.slice(1), helmetColor, 0.7);
 }
 
 /** attack: 0..1 (1 = início do golpe) */

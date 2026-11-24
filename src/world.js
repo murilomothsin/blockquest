@@ -216,17 +216,19 @@ export function buildWorld(scene) {
   sign(19, 22, '↘ Campos do Leste');
   sign(3, -24, '↓ Ruínas Antigas');
 
-  // Limite do mapa: anel de montanhas/penhascos (o jogador é travado em WORLD_RADIUS)
-  for (let i = 0; i < 90; i++) {
-    const a = (i / 90) * Math.PI * 2 + rand() * 0.03;
-    const d = WORLD_RADIUS + 6 + rand() * 14;
-    const h = 14 + rand() * 26, w = 10 + rand() * 12;
-    const m = mesh(new THREE.BoxGeometry(w, h, w), [0x7d8a74, 0x8a8f84, 0x6f7d66][i % 3], Math.cos(a) * d, h / 2 - 1, Math.sin(a) * d);
+  // Limite do mapa: anel de montanhas (o jogador é travado em WORLD_RADIUS)
+  for (let i = 0; i < 70; i++) {
+    const a = (i / 70) * Math.PI * 2 + rand() * 0.04;
+    const d = WORLD_RADIUS + 14 + rand() * 18;
+    const h = 16 + rand() * 28, rad = 12 + rand() * 10;
+    const sides = 5 + Math.floor(rand() * 3);
+    const m = mesh(new THREE.ConeGeometry(rad, h, sides), [0x6f8a5e, 0x7d8a74, 0x667a58][i % 3], Math.cos(a) * d, h / 2 - 0.5, Math.sin(a) * d);
     m.rotation.y = rand() * Math.PI;
     m.castShadow = false;
     scene.add(m);
-    if (h > 24) { // pico nevado
-      const cap = mesh(new THREE.BoxGeometry(w * 0.7, 3, w * 0.7), 0xf2f4f5, m.position.x, h - 1 + 0.5, m.position.z);
+    if (h > 30) { // pico nevado
+      const capH = h * 0.28;
+      const cap = mesh(new THREE.ConeGeometry(rad * 0.28 + 0.3, capH, sides), 0xf2f4f5, m.position.x, h - capH / 2 - 0.4, m.position.z);
       cap.rotation.y = m.rotation.y; cap.castShadow = false;
       scene.add(cap);
     }

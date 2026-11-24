@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ZONES, WORLD_RADIUS } from './world.js';
-import { ITEMS, SHOP, CATEGORIES, category, itemStats } from './items.js';
+import { ITEMS, SHOP, CATEGORIES, category, itemStats, damageReduction } from './items.js';
 import { ACTIONS, RESERVED, keyLabel } from './input.js';
 
 const $ = (id) => document.getElementById(id);
@@ -102,6 +102,8 @@ export class UI {
     $('potions').textContent = p.inv.potion || 0;
     $('bigpotions').textContent = p.inv.big_potion || 0;
     $('weapon').textContent = `${weapon.icon} ${weapon.name}`;
+    const def = this.game?.defense() || 0;
+    $('defense').textContent = def ? `🛡️ Defesa ${def} (−${Math.round(damageReduction(def) * 100)}% dano)` : '🛡️ Sem armadura';
     $('drop').textContent = `${p.kills % 5}/5`;
   }
 
@@ -219,29 +221,48 @@ export class UI {
       if (!ids.length) body.append(h('p', { class: 'empty' }, 'Nada para vender.'));
       body.append(...this.grouped(ids, (id) => {
         const it = ITEMS[id];
-        const locked = id === player.equipped && player.inv[id] <= 1;
+        const eq = this.game.isEquipped(id);
+        const locked = eq && player.inv[id] <= 1;
         return this.itemCard(id, {
           owned: player.inv[id],
-          badge: id === player.equipped ? 'equipada' : null,
+          badge: eq ? 'equipado' : null,
           actions: [h('span', { class: 'price sell' }, `+🪙 ${it.sell}`),
-            h('button', { class: 'sellbtn', disabled: locked, title: locked ? 'Equipe outra arma antes de vender esta' : '', onclick: this.act(() => sell(id)) }, locked ? 'Equipada' : 'Vender')],
+            h('button', { class: 'sellbtn', disabled: locked, title: locked ? 'Tire ou troque este item antes de vender' : '', onclick: this.act(() => sell(id)) }, locked ? 'Equipado' : 'Vender')],
         });
       }));
     }
   }
 
   renderInventory(body) {
-    const { player, use, equip } = this.game;
+    const { player, use, equip, unequip, isEquipped, defense } = this.game;
     $('mtitle').innerHTML = `🎒 Inventário <span class="goldtag">🪙 ${player.gold}</span>`;
+
+    // espaços de equipamento no topo
+    const def = defense();
+    const slot = (label, id, slotKey) => {
+      const it = ITEMS[id];
+      return h('div', { class: `slot ${it ? '' : 'empty'}`, style: `--c:${it?.color != null ? hex(it.color) : '#555'}` },
+        h('div', { class: 'icon' }, it ? it.icon : '—'),
+        h('div', { class: 'info' }, h('small', {}, label), h('b', {}, it ? it.name : 'Vazio'), it ? h('small', {}, itemStats(it)) : null),
+        it && slotKey ? h('button', { class: 'mini secondary', onclick: this.act(() => unequip(slotKey)) }, 'Tirar') : null);
+    };
+    body.append(
+      h('div', { class: 'slots' },
+        slot('Arma', player.equipped, null),
+        slot('Armadura', player.armor, 'armor'),
+        slot('Capacete', player.helmet, 'helmet')),
+      h('p', { class: 'defense' }, `🛡️ Defesa total ${def} → bloqueia ${Math.round(damageReduction(def) * 100)}% do dano recebido`),
+    );
+
     const ids = Object.keys(player.inv).filter((id) => player.inv[id] > 0);
     if (!ids.length) body.append(h('p', { class: 'empty' }, 'Inventário vazio.'));
     body.append(...this.grouped(ids, (id) => {
       const it = ITEMS[id];
-      const isEq = id === player.equipped;
+      const isEq = isEquipped(id);
       const btn = it.kind === 'consumable'
         ? h('button', { onclick: this.act(() => use(id)) }, 'Usar')
-        : h('button', { disabled: isEq, onclick: this.act(() => equip(id)) }, isEq ? 'Equipada' : 'Equipar');
-      return this.itemCard(id, { owned: player.inv[id], badge: isEq ? 'equipada' : null, actions: [btn] });
+        : h('button', { disabled: isEq, onclick: this.act(() => equip(id)) }, isEq ? 'Equipado' : 'Equipar');
+      return this.itemCard(id, { owned: player.inv[id], badge: isEq ? 'equipado' : null, actions: [btn] });
     }));
   }
 

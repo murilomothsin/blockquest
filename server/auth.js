@@ -86,6 +86,8 @@ export function sanitizeSave(d) {
     kills: int(d.kills, 0, 1e9, 0),
     inv,
     equipped: typeof d.equipped === 'string' && ID_RE.test(d.equipped) ? d.equipped : 'wood_sword',
+    armor: typeof d.armor === 'string' && ID_RE.test(d.armor) && inv[d.armor] ? d.armor : null,
+    helmet: typeof d.helmet === 'string' && ID_RE.test(d.helmet) && inv[d.helmet] ? d.helmet : null,
     quest,
     pos: Array.isArray(d.pos) ? [num(d.pos[0], -200, 200, 0), 0, num(d.pos[2], -200, 200, 8)] : [0, 0, 8],
   };

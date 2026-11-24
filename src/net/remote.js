@@ -1,6 +1,6 @@
 // Outros jogadores no mundo: avatar, nome em cima da cabeça e movimento interpolado
 import * as THREE from 'three';
-import { createCharacter, animateCharacter } from '../character.js';
+import { createCharacter, animateCharacter, setGear } from '../character.js';
 import { makeLabel } from '../world.js';
 import { ITEMS } from '../items.js';
 
@@ -64,6 +64,11 @@ export class RemotePlayers {
       p.char.sword.visible = it.style === 'melee';
       p.char.bow.visible = it.style === 'ranged';
       (it.style === 'melee' ? p.char.sword.userData.blade : p.char.bow.userData.limb).material.color.setHex(it.color);
+    }
+    const gearKey = `${s.a || ''}|${s.hm || ''}`;
+    if (gearKey !== p.gearKey) {
+      p.gearKey = gearKey;
+      setGear(p.char, { armorColor: ITEMS[s.a]?.color ?? null, helmetColor: ITEMS[s.hm]?.color ?? null });
     }
     if (!p.has) { p.pos.copy(p.target); p.rot = p.targetRot; }
     p.has = true;

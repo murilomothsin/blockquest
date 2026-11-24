@@ -58,6 +58,6 @@ export class Net {
   }
 
   save(data) { if (!this.send({ t: 'save', data })) this.pendingSave = data; }
-  chat(text) { this.send({ t: 'chat', text }); }
+  chat(text, to = null) { this.send(to ? { t: 'chat', text, to } : { t: 'chat', text }); }
   close() { this.stopped = true; this.ws?.close(); }
 }

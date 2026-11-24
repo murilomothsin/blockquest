@@ -117,6 +117,8 @@ function cleanState(m) {
     x: f(m.x, 300), y: f(m.y, 100), z: f(m.z, 300), r: f(m.r, 100),
     m: f(m.m, 1), air: !!m.air, d: !!m.d, s: Math.trunc(f(m.s, 1e9)),
     w: typeof m.w === 'string' && /^[a-z0-9_]{1,32}$/.test(m.w) ? m.w : 'wood_sword',
+    a: typeof m.a === 'string' && /^[a-z0-9_]{1,32}$/.test(m.a) ? m.a : '',
+    hm: typeof m.hm === 'string' && /^[a-z0-9_]{1,32}$/.test(m.hm) ? m.hm : '',
     hp: f(m.hp, 1e6), mhp: f(m.mhp, 1e6), lv: Math.trunc(f(m.lv, 999)),
   };
 }
@@ -156,6 +158,15 @@ wss.on('connection', (ws) => {
         const now = Date.now();
         if (!text || now - me.lastChat < 500) return;
         me.lastChat = now;
+        if (typeof msg.to === 'string' && msg.to) { // mensagem privada (sussurro)
+          const target = [...players.values()].find((p) => p.name.toLowerCase() === msg.to.toLowerCase());
+          if (!target) { send(ws, { t: 'sys', text: `${msg.to.slice(0, 16)} não está online.` }); return; }
+          if (target.id === me.id) { send(ws, { t: 'sys', text: 'Você não pode sussurrar para si mesmo.' }); return; }
+          const out = { t: 'whisper', id: me.id, from: me.name, toId: target.id, to: target.name, text };
+          send(target.ws, out);
+          send(ws, out);
+          return;
+        }
         broadcast({ t: 'chat', id: me.id, from: me.name, text });
         break;
       }

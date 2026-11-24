@@ -97,6 +97,12 @@ const SYNTH = {
   quest: (s, o, t) => [392, 523, 659, 784].forEach((f, i) => s.tone(o, t + i * 0.12, { type: 'triangle', f0: f, dur: 0.3, vol: 0.22 })),
   drop: (s, o, t) => [880, 1175, 1568].forEach((f, i) => s.tone(o, t + i * 0.1, { f0: f, dur: 0.3, vol: 0.18 })),
   ui: (s, o, t) => s.tone(o, t, { f0: 900, f1: 700, dur: 0.04, vol: 0.12 }),
+  // vestir armadura: "clanc" metálico
+  equip: (s, o, t) => {
+    s.noise(o, t, { dur: 0.12, vol: 0.35, type: 'bandpass', f0: 2600, q: 3 });
+    s.tone(o, t, { type: 'square', f0: 1250, f1: 1180, dur: 0.18, vol: 0.08 });
+    s.tone(o, t + 0.07, { type: 'triangle', f0: 840, dur: 0.22, vol: 0.12 });
+  },
   deny: (s, o, t) => s.tone(o, t, { type: 'square', f0: 150, dur: 0.14, vol: 0.15, lp: 900 }),
 };
 

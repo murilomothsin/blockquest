@@ -5,8 +5,8 @@ export const QUESTS = [
     where: { x: -35, z: -35, label: 'Floresta Sombria' },
     intro: 'Ah, um aventureiro! Os slimes da Floresta Sombria estão devorando nossas plantações. Derrote 5 deles e eu te recompenso.',
     progressText: (n, c) => `Slimes derrotados: ${n}/${c}`,
-    doneText: 'Excelente! A floresta já parece mais tranquila. Aqui está sua recompensa.',
-    reward: { xp: 60, gold: 30, items: { potion: 2 } },
+    doneText: 'Excelente! A floresta já parece mais tranquila. Tome, esta armadura de couro vai te proteger lá fora.',
+    reward: { xp: 60, gold: 30, items: { potion: 2, leather_armor: 1 } },
   },
   {
     id: 'goblins', title: 'Acampamento Goblin', target: 'goblin', count: 4,
