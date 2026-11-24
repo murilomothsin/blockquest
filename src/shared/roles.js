@@ -15,7 +15,7 @@ export const isStaff = (r) => roleOf(r).rank > 0;
 const PERMS = {
   qa: ['test', 'staffchat'],
   mod: ['moderate', 'reports', 'announce', 'staffchat'],
-  admin: ['test', 'moderate', 'reports', 'announce', 'staffchat', 'roles'],
+  admin: ['test', 'moderate', 'reports', 'announce', 'staffchat', 'roles', 'panel'], // panel = painel /admin
 };
 export const can = (role, perm) => (PERMS[role] || []).includes(perm);
 

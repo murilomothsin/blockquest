@@ -3,7 +3,8 @@ import { ZONES, WORLD_RADIUS } from './world.js';
 import { ITEMS, SHOP, SHOP_LISTS, CATEGORIES, category, itemStats, damageReduction } from './items.js';
 import { ACTIONS, RESERVED, keyLabel } from './input.js';
 import { roleOf } from './shared/roles.js';
-import { NOVICE_MAX_LEVEL } from './shared/progress.js';
+import { noviceLevel } from './shared/progress.js';
+import { iconNode } from './assets.js';
 import { BIOMES, biomeBlend, DUNGEONS, HOME_FURNITURE, dungeonAt, inHome, CASTLE } from './shared/worldData.js';
 import {
   CLASSES, CLASS_IDS, CLASS_LEVEL, TREES, SKILLS, RESPEC_COST, skillPointsFree, skillPointsTotal, canRaise, statsOf, activeSkillOf, BUFFS,
@@ -257,7 +258,7 @@ export class UI {
     }
     $('potions').textContent = p.inv.potion || 0;
     $('bigpotions').textContent = p.inv.big_potion || 0;
-    $('weapon').textContent = `${weapon.icon} ${weapon.name}`;
+    $('weapon').replaceChildren(iconNode(p.equipped, weapon.icon), ` ${weapon.name}`);
     const def = this.game?.defense() || 0;
     $('defense').textContent = def ? `🛡️ Defesa ${def} (−${Math.round(damageReduction(def) * 100)}% dano)` : '🛡️ Sem armadura';
     $('drop').textContent = `${p.kills % 5}/5`;
@@ -330,7 +331,7 @@ export class UI {
     box.append(
       h('p', {}, `Derrotado por ${info.by}.`),
       info.novice
-        ? h('p', { class: 'good' }, `🛡️ Proteção de novato: até o nível ${NOVICE_MAX_LEVEL} você não perde os itens. A partir do nível ${NOVICE_MAX_LEVEL + 1}, morrer tira tudo o que você carrega.`)
+        ? h('p', { class: 'good' }, `🛡️ Proteção de novato: até o nível ${noviceLevel()} você não perde os itens. A partir do nível ${noviceLevel() + 1}, morrer tira tudo o que você carrega.`)
         : h('p', { class: 'bad' }, info.items ? `Você perdeu tudo o que carregava (${info.items} ${info.items > 1 ? 'itens' : 'item'}).` : 'Você não carregava itens.'),
       h('p', { class: 'bad' }, `−${info.lost} 🪙 (${info.pct}% do ouro na mão)`),
       h('p', { class: 'tip' }, `A próxima morte custa ${info.nextPct}%. O contador zera em ${fmtTime(info.resetAt - Date.now())} (meia-noite UTC, a cada 2 dias).`),
@@ -505,7 +506,7 @@ export class UI {
     const it = ITEMS[id];
     const color = it.color != null ? hex(it.color) : '#7dff7d';
     return h('div', { class: 'card', style: `--c:${color}` },
-      h('div', { class: 'icon' }, it.icon),
+      h('div', { class: 'icon' }, iconNode(id, it.icon)),
       h('div', { class: 'info' },
         h('b', {}, it.name, badge ? h('span', { class: 'badge' }, badge) : null),
         h('small', {}, itemStats(it)),
@@ -574,7 +575,7 @@ export class UI {
     const slot = (label, id, slotKey) => {
       const it = ITEMS[id];
       return h('div', { class: `slot ${it ? '' : 'empty'}`, style: `--c:${it?.color != null ? hex(it.color) : '#555'}` },
-        h('div', { class: 'icon' }, it ? it.icon : '—'),
+        h('div', { class: 'icon' }, it ? iconNode(id, it.icon) : '—'),
         h('div', { class: 'info' }, h('small', {}, label), h('b', {}, it ? it.name : 'Vazio'), it ? h('small', {}, itemStats(it)) : null),
         it && slotKey ? h('button', { class: 'mini secondary', onclick: this.act(() => unequip(slotKey)) }, 'Tirar') : null);
     };

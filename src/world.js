@@ -3,8 +3,10 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { mulberry32 } from './shared/rng.js';
+import { SLOT_IDS } from './shared/assetConfig.js';
+import { loadTexture, DETAIL_MEAN } from './assets.js';
 import {
-  WORLD_RADIUS, SAFE_ZONE, SAFE_ZONES, WOODS, ZONES, PATHS, HOUSES, LAKE, BIOMES, biomeBlend, buildLayout, createWorldQueries,
+  WORLD_RADIUS, SAFE_ZONE, SAFE_ZONES, WOODS, ZONES, PATHS, HOUSES, LAKE, BIOMES, biomeBlend, biomeAt, buildLayout, createWorldQueries,
   MINE_DOOR, HOME, HOME_FURNITURE, HOME_EXIT, HOME_DOOR, TREASURES, DUNGEONS, tileCenter, dungeonAt,
   CASTLE, CURSED, TOWER, TOWER_DOOR, WELLS, BOSS_ROOMS, NPCS,
 } from './shared/worldData.js';
@@ -92,7 +94,8 @@ export function buildWorld(scene) {
     colors.push(out.r, out.g, out.b);
   }
   groundGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  const ground = dyn(new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({ vertexColors: true })));
+  projectUV(groundGeo);
+  const ground = dyn(new THREE.Mesh(groundGeo, skinMat('chao', new THREE.MeshLambertMaterial({ vertexColors: true }))));
   ground.receiveShadow = true;
   scene.add(ground);
 
@@ -119,8 +122,8 @@ export function buildWorld(scene) {
   // Casas da vila (a primeira é a do jogador)
   for (const h of HOUSES) {
     const g = new THREE.Group();
-    g.add(mesh(new THREE.BoxGeometry(6, 4, 6), h.wall, 0, 2, 0));
-    const r = mesh(new THREE.ConeGeometry(5.2, 3, 4), h.roof, 0, 5.5, 0);
+    g.add(slot(mesh(new THREE.BoxGeometry(6, 4, 6), h.wall, 0, 2, 0), 'parede'));
+    const r = slot(mesh(new THREE.ConeGeometry(5.2, 3, 4), h.roof, 0, 5.5, 0), 'telhado');
     r.rotation.y = Math.PI / 4;
     g.add(r);
     g.add(mesh(new THREE.BoxGeometry(1.4, 2.4, 0.2), h.mine ? 0x8a5a2b : 0x6b4423, 0, 1.2, 3.05));
@@ -149,7 +152,7 @@ export function buildWorld(scene) {
   scene.add(well);
 
   // Lago
-  const lake = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r, 32), new THREE.MeshLambertMaterial({ color: 0x3a8fd9, transparent: true, opacity: 0.85 }));
+  const lake = new THREE.Mesh(projectUV(new THREE.CircleGeometry(LAKE.r, 32)), skinMat('agua', new THREE.MeshLambertMaterial({ color: 0x3a8fd9, transparent: true, opacity: 0.85 }), 'plain'));
   lake.rotation.x = -Math.PI / 2; lake.position.set(LAKE.x, 0.05, LAKE.z);
   scene.add(lake);
 
@@ -221,7 +224,7 @@ export function buildWorld(scene) {
 
   // Pântano: poças escuras e juncos
   for (const p of layout.ponds) {
-    const d = new THREE.Mesh(new THREE.CircleGeometry(p.r, 20), new THREE.MeshLambertMaterial({ color: 0x2f3d24, transparent: true, opacity: 0.9 }));
+    const d = new THREE.Mesh(projectUV(new THREE.CircleGeometry(p.r, 20)), skinMat('agua', new THREE.MeshLambertMaterial({ color: 0x2f3d24, transparent: true, opacity: 0.9 }), 'plain'));
     d.rotation.x = -Math.PI / 2; d.position.set(p.x, 0.04, p.z);
     scene.add(d);
   }
@@ -391,8 +394,67 @@ export function buildWorld(scene) {
   const areas = groupByArea(scene, firstChild);
   for (const g of Object.values(areas)) batchStatic(g);
 
+  // ---------- Vegetação (sprites de grama do painel admin) ----------
+  let foliage = null, foliageToken = 0;
+  async function setFoliage(v) {
+    const token = ++foliageToken;
+    if (foliage) {
+      foliage.parent?.remove(foliage);
+      foliage.traverse((o) => { if (o.isMesh) { o.material.dispose(); } });
+      foliage = null;
+    }
+    if (!v?.ativo || !v.sprites?.length) return 0;
+    const texs = (await Promise.all(v.sprites.map((p) => loadTexture(p, { alpha: true, filtro: 'suave' }).catch(() => null)))).filter(Boolean);
+    if (token !== foliageToken || !texs.length) return 0;
+    const rnd = mulberry32(4242);
+    const N = Math.round(2600 * v.densidade);
+    const per = texs.map(() => []);
+    const roadD = (x, z) => Math.min(...PATHS.map(([x2, z2]) => {
+      const L2 = x2 * x2 + z2 * z2, k = Math.max(0, Math.min(1, (x * x2 + z * z2) / L2));
+      return Math.hypot(x - x2 * k, z - z2 * k);
+    }));
+    const cBase = new THREE.Color();
+    let placed = 0;
+    for (let i = 0; i < N * 4 && placed < N; i++) {
+      const r = Math.sqrt(rnd()) * (WORLD_RADIUS - 6), a = rnd() * Math.PI * 2;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      const b = biomeAt(x, z);
+      if (rnd() > (FOLIAGE_BIOMES[b] ?? 0)) continue;
+      if (q.isBlocked(x, z, 0.6) || roadD(x, z) < 2.8 || Math.hypot(x - SAFE_ZONE.x, z - SAFE_ZONE.z) < 7) continue;
+      if (Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.r + 0.5) continue;
+      const blend = biomeBlend(x, z);
+      cBase.setHex(BIOMES.grass.ground);
+      if (blend.k > 0) cBase.lerp(_col.setHex(BIOMES[blend.id].ground), blend.k);
+      cBase.multiplyScalar(0.72 + rnd() * 0.25);
+      per[Math.floor(rnd() * texs.length)].push({ x, z, s: v.tamanho * (0.55 + rnd() * 0.6), rot: rnd() * Math.PI, c: cBase.clone() });
+      placed++;
+    }
+    const geo = crossQuad();
+    const g = new THREE.Group();
+    g.name = 'vegetacao';
+    const m4 = new THREE.Matrix4(), qt = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3(), ps = new THREE.Vector3();
+    texs.forEach((tex, i) => {
+      const list = per[i];
+      if (!list.length) return;
+      const im = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.45, side: THREE.DoubleSide }), list.length);
+      list.forEach((it, k) => {
+        m4.compose(ps.set(it.x, 0, it.z), qt.setFromAxisAngle(up, it.rot), sc.set(it.s, it.s, it.s));
+        im.setMatrixAt(k, m4); im.setColorAt(k, it.c);
+      });
+      im.receiveShadow = true;
+      im.computeBoundingSphere();
+      g.add(im);
+    });
+    areas.world.add(g);
+    foliage = g;
+    return placed;
+  }
+
   return {
     ...q, trees, treasures, furniture, fadeOccluders, dungeons,
+    /** visual do painel admin: texturas por categoria e vegetação */
+    applyAssets: (cfg) => Promise.all([applySkin(cfg), setFoliage(cfg.vegetacao)]),
+    slotColors: () => Object.fromEntries(Object.entries(slotColors).map(([k, s]) => [k, [...s].map((c) => `#${c.toString(16).padStart(6, '0')}`)])),
     /** só a área em que o jogador está fica na cena: 'world' | 'home' | id da dungeon (mine, tower1..4) */
     showArea: (key) => { for (const [k, g] of Object.entries(areas)) g.visible = k === key; },
     /** abaixa as paredes da dungeon que ficam entre a câmera e o jogador (técnica de "cutaway") */
@@ -405,6 +467,111 @@ export function buildWorld(scene) {
   };
 }
 
+
+
+// ---------- Texturas do mundo (painel admin) ----------
+// Os objetos do mapa só têm cor. Cada cor cai numa categoria (chão, pedra, madeira...) e o painel escolhe
+// a textura de cada categoria. Modo "detalhe": textura em tons de cinza × cor original (mantém a paleta);
+// modo "original": a cor da própria textura.
+/** materiais de cada categoria: { mat, kind: 'vc' (cor por vértice) | 'inst' (InstancedMesh) | 'plain', im?, color? } */
+const skinMats = new Map(SLOT_IDS.map((id) => [id, []]));
+/** cores que caíram em cada categoria (para conferir/ajustar a classificação) */
+const slotColors = Object.fromEntries(SLOT_IDS.map((id) => [id, new Set()]));
+function skinMat(slotId, m, kind = 'vc', im = null) {
+  const list = skinMats.get(slotId) || skinMats.get('outros');
+  list.push({ mat: m, kind, im, colors: im?.instanceColor || null, color: m.color.clone() });
+  return m;
+}
+const slot = (o, id) => { o.userData.slot = id; return o; };
+
+const _hsl = {};
+const _col = new THREE.Color();
+/** categoria de textura pela cor */
+export function classifyColor(hex) {
+  _col.setHex(hex).getHSL(_hsl, THREE.SRGBColorSpace);
+  const h = _hsl.h * 360, s = _hsl.s, l = _hsl.l;
+  if (l > 0.9 && s < 0.4) return 'neve';
+  if (s < 0.13 || (s < 0.22 && l < 0.3)) return 'pedra';
+  if (h >= 72 && h <= 170 && s > 0.15) return 'folhas';
+  if (h >= 180 && h <= 260) return 'outros'; // azuis: janelas, água do poço, cristais
+  if ((h < 16 || h > 330) && s > 0.3) return 'telhado';
+  if (h >= 16 && h < 52) return l < 0.5 ? 'madeira' : l > 0.8 ? 'parede' : 'areia';
+  if (h >= 52 && h < 72) return l > 0.55 ? 'areia' : 'folhas';
+  if (s < 0.25) return 'pedra';
+  return 'outros';
+}
+
+/**
+ * Coordenadas de textura por projeção em caixa (como blocos do Minecraft): cada face usa o plano
+ * mais alinhado com ela. 1 unidade = 1 metro; a escala (metros por repetição) fica no texture.repeat.
+ * yScale: altura real de geometrias que são esticadas em Y (paredes instanciadas das dungeons).
+ */
+function projectUV(g, yScale = 1) {
+  const p = g.attributes.position, n = p.count;
+  const uv = new Float32Array(n * 2);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), nr = new THREE.Vector3();
+  const nAttr = g.attributes.normal;
+  const perTri = !g.index; // sem índice: decide por triângulo (cones e pedras não ficam distorcidos)
+  const step = perTri ? 3 : 1;
+  for (let i = 0; i < n; i += step) {
+    if (perTri && i + 2 < n) {
+      a.fromBufferAttribute(p, i); b.fromBufferAttribute(p, i + 1); c.fromBufferAttribute(p, i + 2);
+      nr.subVectors(c, b).cross(a.sub(b));
+    } else if (nAttr) nr.fromBufferAttribute(nAttr, i);
+    else nr.set(0, 1, 0);
+    const ax = Math.abs(nr.x), ay = Math.abs(nr.y), az = Math.abs(nr.z);
+    for (let k = 0; k < step && i + k < n; k++) {
+      const x = p.getX(i + k), y = p.getY(i + k) * yScale, z = p.getZ(i + k);
+      let u, v;
+      if (ay >= ax && ay >= az) { u = x; v = z; } else if (ax >= az) { u = z; v = y; } else { u = x; v = y; }
+      uv[(i + k) * 2] = u; uv[(i + k) * 2 + 1] = v;
+    }
+  }
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  return g;
+}
+
+let skinToken = 0;
+/** aplica as texturas da config do painel (assets.texturas) */
+async function applySkin(cfg) {
+  const token = ++skinToken;
+  const loaded = await Promise.all(SLOT_IDS.map(async (id) => {
+    const s = cfg.texturas?.[id];
+    if (!s?.tex) return [id, s, null];
+    try {
+      return [id, s, await loadTexture(s.tex, { detail: s.modo === 'detalhe', forca: s.forca, filtro: cfg.filtro, repeat: 1 / s.escala })];
+    } catch (e) { console.warn('[texturas]', e.message); return [id, s, null]; }
+  }));
+  if (token !== skinToken) return; // outra mudança chegou enquanto carregava
+  for (const [id, s, tex] of loaded) {
+    const detail = !!tex && s.modo === 'detalhe';
+    for (const e of skinMats.get(id)) {
+      const m = e.mat;
+      m.map = tex;
+      if (e.kind === 'plain') {
+        m.color.copy(e.color);
+        if (tex && !detail) m.color.setRGB(1, 1, 1);
+        if (detail) m.color.multiplyScalar(1 / DETAIL_MEAN);
+      } else {
+        m.color.setScalar(detail ? 1 / DETAIL_MEAN : 1);
+        if (e.kind === 'vc') m.vertexColors = !tex || detail;
+        if (e.kind === 'inst' && e.im) e.im.instanceColor = tex && !detail ? null : e.colors;
+      }
+      m.needsUpdate = true;
+    }
+  }
+}
+
+/** geometria de "X" (dois planos cruzados) para tufos de grama */
+function crossQuad() {
+  const a = new THREE.PlaneGeometry(1, 1); a.translate(0, 0.5, 0);
+  const b = a.clone(); b.rotateY(Math.PI / 2);
+  const g = mergeGeometries([a, b]);
+  const nrm = g.attributes.normal;
+  for (let i = 0; i < nrm.count; i++) nrm.setXYZ(i, 0, 1, 0); // luz de cima: o tufo não fica escuro de lado
+  return g;
+}
+const FOLIAGE_BIOMES = { grass: 1, highlands: 1, swamp: 0.7, cursed: 0.35, quarry: 0.15 };
 
 // ---------- Otimização da cena ----------
 const fadedCache = new Map();
@@ -433,10 +600,12 @@ function instanceTrees(scene, trees) {
     });
   }
   const meshes = new Map();
-  const white = new THREE.MeshLambertMaterial({ color: 0xffffff });
   for (const [geo, list] of byGeo) {
-    const im = new THREE.InstancedMesh(geo, white, list.length);
+    const g2 = projectUV(geo.index && geo.type !== 'BoxGeometry' ? geo.toNonIndexed() : geo.clone());
+    const white = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const im = new THREE.InstancedMesh(g2, white, list.length);
     list.forEach((it, i) => { im.setMatrixAt(i, it.m); im.setColorAt(i, it.c); });
+    skinMat(classifyColor(list[0].c.getHex()), white, 'inst', im);
     im.castShadow = list[0].cast; im.receiveShadow = true;
     im.computeBoundingSphere();
     scene.add(im);
@@ -477,9 +646,12 @@ function groupByArea(scene, first) {
  */
 const CHUNK = 48;
 const batchMats = new Map();
-function batchMat(type, side) {
-  const k = `${type}${side}`;
-  if (!batchMats.has(k)) batchMats.set(k, type === 'b' ? new THREE.MeshBasicMaterial({ vertexColors: true, side }) : new THREE.MeshLambertMaterial({ vertexColors: true, side }));
+function batchMat(type, side, slotId) {
+  const k = `${type}${side}${slotId}`;
+  if (!batchMats.has(k)) {
+    // brilhos (MeshBasic) não recebem textura: continuam só cor
+    batchMats.set(k, type === 'b' ? new THREE.MeshBasicMaterial({ vertexColors: true, side }) : skinMat(slotId, new THREE.MeshLambertMaterial({ vertexColors: true, side })));
+  }
   return batchMats.get(k);
 }
 function batchStatic(root) {
@@ -493,11 +665,16 @@ function batchStatic(root) {
     if (m.isMeshLambertMaterial && m.emissive.getHex() !== 0) return;
     wp.setFromMatrixPosition(o.matrixWorld);
     const type = m.isMeshBasicMaterial ? 'b' : 'l';
-    const key = `${Math.floor(wp.x / CHUNK)}|${Math.floor(wp.z / CHUNK)}|${type}|${o.castShadow ? 1 : 0}|${o.receiveShadow ? 1 : 0}|${m.side}`;
     const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
     for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
     g.morphAttributes = {};
     g.applyMatrix4(o.matrixWorld);
+    projectUV(g); // textura em coordenadas do mundo: 1 repetição por metro (a escala vem do painel)
+    const decal = /Plane|Circle|Ring/.test(o.geometry.type) && g.attributes.normal.getY(0) > 0.9 && wp.y < 0.3;
+    const byColor = classifyColor(m.color.getHex());
+    const slotId = o.userData.slot || (decal && byColor !== 'telhado' && byColor !== 'outros' ? 'caminho' : byColor);
+    if (type === 'l') slotColors[slotId]?.add(m.color.getHex());
+    const key = `${Math.floor(wp.x / CHUNK)}|${Math.floor(wp.z / CHUNK)}|${type}|${o.castShadow ? 1 : 0}|${o.receiveShadow ? 1 : 0}|${m.side}|${slotId}`;
     const n = g.attributes.position.count, col = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) { col[i * 3] = m.color.r; col[i * 3 + 1] = m.color.g; col[i * 3 + 2] = m.color.b; }
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
@@ -510,10 +687,10 @@ function batchStatic(root) {
   const prune = (o) => { for (const c of [...o.children]) prune(c); if (o !== root && o.type === 'Group' && !o.children.length) o.parent?.remove(o); };
   prune(root);
   for (const [key, geos] of buckets) {
-    const [, , type, cast, recv, side] = key.split('|');
+    const [, , type, cast, recv, side, slotId] = key.split('|');
     const merged = mergeGeometries(geos);
     geos.forEach((g) => g.dispose());
-    const mm = new THREE.Mesh(merged, batchMat(type, +side));
+    const mm = new THREE.Mesh(merged, batchMat(type, +side, slotId));
     mm.castShadow = cast === '1'; mm.receiveShadow = recv === '1';
     mm.matrixAutoUpdate = false;
     root.add(mm);
@@ -529,7 +706,7 @@ function buildDungeon(scene, d, deco, animated) {
   const T = d.tile, W = d.cols * T, D = d.rows * T;
   const tower = d.style === 'tower';
   const H = WALL_H[d.style];
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), mat(tower ? 0x56506a : 0x4a3b2e));
+  const floor = slot(new THREE.Mesh(new THREE.PlaneGeometry(W, D), mat(tower ? 0x56506a : 0x4a3b2e)), 'piso_dungeon');
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(d.x0 + W / 2, 0.01, d.z0 + D / 2);
   floor.receiveShadow = true;
@@ -545,7 +722,8 @@ function buildDungeon(scene, d, deco, animated) {
       if (open) walls.push({ ...tileCenter(d, x, z) });
     }
   }
-  const wallMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(T, 1, T), mat(0xffffff), walls.length);
+  const wallMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const wallMesh = new THREE.InstancedMesh(projectUV(new THREE.BoxGeometry(T, 1, T), H), wallMat, walls.length);
   const m4 = new THREE.Matrix4(), col = new THREE.Color();
   const rnd = mulberry32(d.id.length * 97 + d.x0 + d.z0);
   const heights = new Float32Array(walls.length).fill(H);
@@ -556,6 +734,7 @@ function buildDungeon(scene, d, deco, animated) {
   });
   wallMesh.castShadow = true; wallMesh.receiveShadow = true;
   wallMesh.userData.area = d.id; // fica na origem (as instâncias é que têm posição): diz a área na mão
+  skinMat('parede_dungeon', wallMat, 'inst', wallMesh);
   scene.add(wallMesh);
 
   if (tower) { // tapete vermelho e círculo mágico no chão

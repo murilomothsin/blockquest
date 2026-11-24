@@ -25,6 +25,9 @@ import { Net } from './net/net.js';
 import { RemotePlayers } from './net/remote.js';
 import { Bubbles } from './net/bubble.js';
 import { TouchControls, isTouchDevice } from './touch.js';
+import { fetchConfig, setConfig, onAssetsChange, assetConfig } from './assets.js';
+import { Particles } from './fx.js';
+import { SETTINGS } from './shared/settings.js';
 
 const TOUCH = isTouchDevice();
 
@@ -59,7 +62,12 @@ Object.assign(sun.shadow.camera, { left: -45, right: 45, top: 45, bottom: -45, n
 sun.shadow.bias = -0.0005;
 scene.add(sun, sun.target);
 
+// visual e regras configurados no painel admin (texturas, ícones, efeitos, multiplicadores)
+await fetchConfig();
 const world = buildWorld(scene);
+const particles = new Particles(scene);
+const applyAssets = (cfg) => { world.applyAssets(cfg); particles.setConfig(cfg.efeitos); };
+applyAssets(assetConfig());
 const sound = new Sound();
 const sfx = (name, pos = null, vol = 1) => sound.play(name, pos, vol);
 const input = new Input(renderer.domElement);
@@ -85,6 +93,7 @@ const SAVE_KEY = 'blockquest-save-v2';
 function load() {
   try {
     if (session.online) return normalizeCharacter(session.save);
+    if (session.preview) return normalizeCharacter({ level: 8, gold: 500, inv: { potion: 5, iron_sword: 1, wood_sword: 1, steel_armor: 1, iron_helmet: 1, scroll_return: 2 }, equipped: 'iron_sword', armor: 'steel_armor', helmet: 'iron_helmet' });
     let s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
     const old = !s && JSON.parse(localStorage.getItem('blockquest-save-v1') || 'null');
     if (old) { // migra save antigo (weaponLvl/potions) para inventário
@@ -96,7 +105,7 @@ function load() {
 }
 /** só offline: online quem salva é o servidor */
 function save() {
-  if (net) return;
+  if (net || session.preview) return;
   const data = publicCharacter({ ...player, pos: [player.pos.x, 0, player.pos.z] });
   localStorage.setItem(SAVE_KEY, JSON.stringify(data));
 }
@@ -128,7 +137,7 @@ const isEquipped = (id) => isEquippedBy(player, id);
 const facing = () => new THREE.Vector3(Math.sin(player.rotY), 0, Math.cos(player.rotY));
 const headPos = (p, hgt = 2.8) => new THREE.Vector3(p.x, hgt, p.z);
 const distXZ = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
-const CHAR_KEYS = ['level', 'xp', 'gold', 'maxHp', 'hp', 'kills', 'inv', 'equipped', 'armor', 'helmet', 'quest', 'cls', 'skills', 'chests', 'home', 'deaths', 'buffs', 'farm'];
+const CHAR_KEYS = ['level', 'xp', 'gold', 'maxHp', 'hp', 'kills', 'inv', 'equipped', 'armor', 'helmet', 'quest', 'cls', 'skills', 'chests', 'home', 'deaths', 'buffs', 'farm', 'stats'];
 /** personagem vindo do servidor substitui o local */
 function applyChar(c) {
   if (!c) return;
@@ -157,8 +166,8 @@ function applyFx(list = []) {
       case 'log': ui.log(f.text, f.cls); break;
       case 'sfx': sfx(f.name, f.at ? at(f) : null); break;
       case 'float': ui.float(headPos(at(f), f.h ?? 2.8), f.text, f.color, f.size); break;
-      case 'levelUp': ui.float(headPos(player.pos, 3.8), 'LEVEL UP!', '#f5b82e', 30); sfx('levelUp'); break;
-      case 'heal': ui.float(headPos(player.pos), `+${f.n}`, f.color, 22); break;
+      case 'levelUp': ui.float(headPos(player.pos, 3.8), 'LEVEL UP!', '#f5b82e', 30); sfx('levelUp'); particles.emit('nivel', player.pos, { h: 0.4 }); break;
+      case 'heal': ui.float(headPos(player.pos), `+${f.n}`, f.color, 22); particles.emit('cura', player.pos, { h: 0.6 }); break;
       case 'loot': loot.drop(f.item, { x: f.x, z: f.z }, f.lid, f.n); break;
       case 'lootGone': loot.remove(f.lid); break;
       case 'pickup': {
@@ -366,8 +375,10 @@ function currentTarget() {
 
 // ---------- Combate ----------
 /** Número de dano em cima do monstro. `mine`: golpe meu (amarelo/branco) ou de outro jogador (cinza, menor). */
-function reportHit({ enemy, dmg, crit, mine }) {
+function reportHit({ enemy, dmg, crit, killed, mine }) {
   if (mine) sfx(crit ? 'crit' : 'hit', enemy.pos);
+  particles.emit(crit ? 'critico' : 'golpe', enemy.pos, { h: enemy.def.height * 0.6 });
+  if (killed) particles.emit('morte', enemy.pos, { h: enemy.def.height * 0.4 });
   const color = mine ? (crit ? '#ffd84a' : '#ffffff') : '#b9c2d0';
   ui.float(headPos(enemy.pos, enemy.def.height + 0.4), crit ? `${dmg}!` : `${dmg}`, color, mine ? (crit ? 28 : 20) : 15);
 }
@@ -375,6 +386,7 @@ enemies.handlers = {
   onDamage: reportHit,
   onKill: (e, key) => onKill(e, key),
   onPlayerHit: (dmg, e) => onPlayerHit(dmg, e),
+  onFx: (kind, at, h) => particles.emit(kind, at, { h }),
   onWild: (e) => ui.log(`⚠️ Um ${e.def.name.toLowerCase()} saltou do meio das árvores!`, 'bad'),
 };
 
@@ -673,6 +685,7 @@ if (session.online) {
     if (!mine) sfx('pickup');
   });
   net.on('sys', (m) => ui.chatMsg(null, m.text, 'sys'));
+  net.on('config', (m) => { setConfig(m); if (m.notice) ui.log(m.notice, 'info'); });
   net.on('staff', (m) => { ui.chatMsg(`[Equipe] ${m.from}`, m.text, 'staff', m.from === session.user.username ? null : m.from, m.role); sfx('ui'); });
   net.on('announce', (m) => { ui.chatMsg(`📢 ${m.from}`, m.text, 'announce'); ui.announce(m.text, m.from); sfx('quest'); });
 
@@ -1013,6 +1026,7 @@ function frame(now) {
   const dt = Math.min(0.05, clock.getDelta());
   const t0 = performance.now();
   update(dt);
+  particles.update(dt);
   const t1 = performance.now();
   renderer.render(scene, camera);
   const t2 = performance.now();
@@ -1022,8 +1036,25 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+onAssetsChange((cfg) => { applyAssets(cfg); ui.refresh(); });
+
+// ---------- Prévia do painel admin (/?preview=1 dentro de um iframe do /admin) ----------
+if (session.preview) {
+  player.hp = player.maxHp = 1e7; // ninguém morre na prévia
+  document.body.classList.add('preview');
+  addEventListener('message', (ev) => {
+    if (ev.origin !== location.origin || !ev.data || typeof ev.data !== 'object') return;
+    const m = ev.data;
+    if (m.t === 'preview-assets') setConfig({ assets: m.assets });
+    if (m.t === 'preview-tp') { player.pos.set(m.x, 0, m.z); player.vy = 0; }
+    if (m.t === 'preview-fx') particles.emit(m.kind, player.pos.clone().add(facing().multiplyScalar(2.5)), { h: 1.2 });
+  });
+  parent.postMessage({ t: 'preview-ready' }, location.origin);
+}
+
 ui.log('Bem-vindo a BlockQuest! Fale com o Ancião Bento.', 'info');
+if (SETTINGS.motd && !session.online) ui.log(`📢 ${SETTINGS.motd}`, 'info');
 frame();
 
 // atalho de debug no console
-window.game = { player, cam, renderer, scene, camera, perf, enemies, loot, ui, equip, unequip, defense, onPlayerHit, addItem, request, applyFx, localLoot, projectiles, world, sound, session, get net() { return net; }, get remote() { return remote; }, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };
+window.game = { particles, setConfig, assetConfig, player, cam, renderer, scene, camera, perf, enemies, loot, ui, equip, unequip, defense, onPlayerHit, addItem, request, applyFx, localLoot, projectiles, world, sound, session, get net() { return net; }, get remote() { return remote; }, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };

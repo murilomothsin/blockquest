@@ -1,6 +1,10 @@
 // Simulação dos monstros em dados puros (sem three.js / DOM).
 // Roda no navegador no modo offline e no servidor no modo online — a mesma IA nos dois.
 import { SAFE_ZONES, DUNGEON_SPAWNS, ZONES, CURSED, TOWER, dungeonAt } from './worldData.js';
+import { SETTINGS } from './settings.js';
+
+/** vida máxima com o multiplicador do painel admin */
+export const mobMaxHp = (def) => Math.max(1, Math.round(def.hp * SETTINGS.mobHpMul));
 
 /**
  * Respawn: na superfície normal; nas dungeons e nas Ruínas Amaldiçoadas bem mais lento e GRADUAL
@@ -145,7 +149,7 @@ export class MobSim {
     const def = TYPES[type];
     const m = {
       id: this.nextId++, type, def, x, z, y: 0, rot: this.rand() * 6,
-      spawnX: x, spawnZ: z, hp: def.hp, state: 'idle', leashed: false,
+      spawnX: x, spawnZ: z, hp: mobMaxHp(def), maxHp: mobMaxHp(def), state: 'idle', leashed: false,
       key: opts.wild ? null : `${type}@${Math.round(x)},${Math.round(z)}`, area: respawnArea(x, z),
       wanderX: x, wanderZ: z, wanderT: this.rand() * 3,
       atkCd: 0, pendingHit: 0, deadT: 0, t: 0, moving: 0, provokedT: 0,
@@ -166,6 +170,23 @@ export class MobSim {
   }
 
   alive() { return this.mobs.filter((m) => m.state !== 'dead'); }
+
+  /** painel admin: tira os selvagens e faz todos os outros renascerem cheios no ponto de origem */
+  resetAll() {
+    for (const m of [...this.mobs]) if (m.wild) { this.remove(m); }
+    this.mobs = this.mobs.filter((m) => !m.removed);
+    this.rocks = [];
+    this.gate?.clear?.();
+    for (const m of this.mobs) {
+      m.maxHp = mobMaxHp(m.def);
+      Object.assign(m, {
+        x: m.spawnX, z: m.spawnZ, y: 0, hp: m.maxHp, state: 'idle', targetId: null, leashed: false, deadT: 0, windup: 0,
+        pendingHit: 0, provokedT: 0, wanderX: m.spawnX, wanderZ: m.spawnZ, emergeT: 0, lastHitT: -99,
+      });
+      m.contrib.clear();
+    }
+    return this.mobs.length;
+  }
 
   // ---------- Dano ----------
   /** Aplica dano de um jogador. Retorna {id, dmg, crit, killed}. */
@@ -189,7 +210,7 @@ export class MobSim {
     m.hp = 0;
     m.state = 'dead';
     const mul = m.area && m.area !== 'ruins' ? RESPAWN.dungeonMul : m.area === 'ruins' ? (m.def.boss ? RESPAWN.bossMul : RESPAWN.ruinsMul) : m.def.boss ? RESPAWN.bossMul : 1;
-    m.deadT = m.def.respawn * mul;
+    m.deadT = m.def.respawn * mul * SETTINGS.respawnMul;
     m.deadFor = m.deadT;
     m.windup = 0;
     m.pendingHit = 0;
@@ -234,7 +255,8 @@ export class MobSim {
           this.gate.set(m.area, this.time + RESPAWN.gap);
         }
         if (m.deadT <= 0) {
-          m.state = 'idle'; m.hp = def.hp; m.targetId = null; m.leashed = false;
+          m.maxHp = mobMaxHp(def);
+          m.state = 'idle'; m.hp = m.maxHp; m.targetId = null; m.leashed = false;
           m.x = m.spawnX; m.z = m.spawnZ; m.y = 0;
         }
         continue;
@@ -315,15 +337,15 @@ export class MobSim {
       } else m.y = 0;
 
       m.atkCd -= dt;
-      if (m.state !== 'chase' && m.hp < def.hp && m.t - m.lastHitT > REGEN_DELAY) {
-        m.hp = Math.min(def.hp, m.hp + def.hp * REGEN_RATE * dt);
+      if (m.state !== 'chase' && m.hp < m.maxHp && m.t - m.lastHitT > REGEN_DELAY) {
+        m.hp = Math.min(m.maxHp, m.hp + m.maxHp * REGEN_RATE * dt);
       }
       if (m.pendingHit > 0) {
         m.pendingHit -= dt;
         if (m.pendingHit <= 0) {
           if (def.boss) this.emit({ e: 'slam', id: m.id, x: m.x, z: m.z });
           if (target && !target.dead && dist < def.range * 1.35) {
-            this.emit({ e: 'hurtPlayer', pid: target.id, dmg: def.dmg, id: m.id, type: m.type });
+            this.emit({ e: 'hurtPlayer', pid: target.id, dmg: def.dmg * SETTINGS.mobDmgMul, id: m.id, type: m.type });
           }
         }
       }
@@ -371,7 +393,7 @@ export class MobSim {
       this.emit({ e: 'impact', id: r.id, x: r.tx, z: r.tz, r: r.r });
       for (const p of players) {
         if (!p.dead && Math.hypot(p.x - r.tx, p.z - r.tz) < r.r + 0.4) {
-          this.emit({ e: 'hurtPlayer', pid: p.id, dmg: r.dmg, id: r.mob, type: r.type });
+          this.emit({ e: 'hurtPlayer', pid: p.id, dmg: r.dmg * SETTINGS.mobDmgMul, id: r.mob, type: r.type });
         }
       }
     }
@@ -424,6 +446,6 @@ export class MobSim {
   /** Estado compacto para enviar pela rede: [id, tipo, x, z, y, rot, hp, estado, andando, windup] */
   snapshot(m) {
     const r2 = (v) => Math.round(v * 100) / 100;
-    return [m.id, TYPE_IDS.indexOf(m.type), r2(m.x), r2(m.z), r2(m.y), r2(m.rot), Math.ceil(m.hp), STATES.indexOf(m.state), r2(m.moving), r2(Math.max(0, m.windup))];
+    return [m.id, TYPE_IDS.indexOf(m.type), r2(m.x), r2(m.z), r2(m.y), r2(m.rot), Math.ceil(m.hp), STATES.indexOf(m.state), r2(m.moving), r2(Math.max(0, m.windup)), m.maxHp];
   }
 }

@@ -45,6 +45,19 @@ db.exec(`
     status      TEXT NOT NULL DEFAULT 'aberta'
   );
 
+  -- configuração do painel admin (visual/assets e regras do jogo), JSON por chave
+  CREATE TABLE IF NOT EXISTS config (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL
+  );
+
+  -- contadores do mundo para o painel (dano por arma/monstro, abates, mortes, drops, compras...)
+  CREATE TABLE IF NOT EXISTS world_stats (
+    key         TEXT PRIMARY KEY,
+    value       INTEGER NOT NULL
+  );
+
   -- tudo que a equipe faz (comandos de teste, punições, mudanças de cargo)
   CREATE TABLE IF NOT EXISTS staff_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,4 +101,13 @@ export const q = {
   deleteUserSessions: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
   staffLog: db.prepare('INSERT INTO staff_log (actor_id, actor_name, action, target_name, details, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
   staffList: db.prepare("SELECT username, role FROM users WHERE role != 'player' ORDER BY role, username"),
+  getConfig: db.prepare('SELECT value, updated_at FROM config WHERE key = ?'),
+  setConfig: db.prepare(`INSERT INTO config (key, value, updated_at) VALUES (?, ?, ?)
+                         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`),
+  allStats: db.prepare('SELECT key, value FROM world_stats'),
+  setStat: db.prepare(`INSERT INTO world_stats (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`),
+  clearStats: db.prepare('DELETE FROM world_stats'),
+  allCharacters: db.prepare(`SELECT u.id, u.username, u.role, u.last_login, u.created_at, c.data FROM users u
+                             LEFT JOIN characters c ON c.user_id = u.id`),
+  userById: db.prepare('SELECT id, username, role FROM users WHERE id = ?'),
 };

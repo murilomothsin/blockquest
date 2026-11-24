@@ -13,6 +13,9 @@ import { runCommand, CLOSE } from './commands.js';
 import { checkChat, report } from './moderation.js';
 import { q } from './db.js';
 import { publicCharacter } from '../src/shared/progress.js';
+import { createAdmin } from './admin.js';
+import { flushStats } from './stats.js';
+import { SETTINGS } from '../src/shared/settings.js';
 
 const PORT = Number(process.env.PORT) || 3001;
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -49,6 +52,7 @@ function rateLimit(req, max = 20, windowMs = 10 * 60_000) {
 const charFor = (id) => publicCharacter(players.get(id)?.c || loadCharacter(id));
 
 async function handleApi(req, res, url) {
+  if (await admin.handle(req, res, url, { sendJson, readJson })) return;
   const route = `${req.method} ${url.pathname}`;
   switch (route) {
     case 'POST /api/register': {
@@ -81,8 +85,20 @@ async function handleApi(req, res, url) {
   }
 }
 
+const PACKS = join(ROOT, 'public', 'packs');
 async function serveStatic(req, res, url) {
   let path = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, '');
+  if (path === '/admin' || path === '/admin/') path = '/admin.html';
+  // pacotes de assets: direto de public/packs (o que o admin envia aparece na hora, sem rebuild)
+  if (path.startsWith('/packs/')) {
+    const f = join(PACKS, path.slice(7));
+    if (!f.startsWith(PACKS + '/') || !/\.(png|json|txt)$/.test(f)) { res.writeHead(404); return res.end(); }
+    try {
+      const body = await readFile(f);
+      res.writeHead(200, { 'Content-Type': MIME[extname(f)] || 'application/octet-stream', 'Cache-Control': 'public, max-age=300' });
+      return res.end(body);
+    } catch { res.writeHead(404); return res.end(); }
+  }
   let file = join(DIST, path);
   if (!file.startsWith(DIST)) { res.writeHead(403); return res.end(); }
   try {
@@ -121,12 +137,14 @@ const broadcast = (msg, exceptId = null) => {
   for (const p of players.values()) if (p.id !== exceptId && p.ws.readyState === 1) p.ws.send(data);
 };
 const game = createGame({ players, send });
+const admin = createAdmin({ root: ROOT, players, broadcast, game });
 const findOnline = (name) => [...players.values()].find((p) => p.name.toLowerCase() === String(name).toLowerCase());
 
 const f = (v, lim = 1e4) => (Number.isFinite(v) ? Math.max(-lim, Math.min(lim, v)) : 0);
 /** só posição e animação vêm do cliente; arma/vida/nível o servidor preenche (game.handleState) */
 const cleanState = (m) => ({
-  x: f(m.x, 1000), y: f(m.y, 100), z: f(m.z, 1000), // mina, torre e casa ficam em x 400–690 (fora do mapa visível) r: f(m.r, 100), m: f(m.m, 1), air: !!m.air, s: Math.trunc(f(m.s, 1e9)),
+  x: f(m.x, 1000), y: f(m.y, 100), z: f(m.z, 1000), // mina, torre e casa ficam em x 400–690 (fora do mapa visível)
+  r: f(m.r, 100), m: f(m.m, 1), air: !!m.air, s: Math.trunc(f(m.s, 1e9)),
 });
 
 wss.on('connection', (ws) => {
@@ -162,6 +180,8 @@ wss.on('connection', (ws) => {
         players: [...players.values()].filter((p) => p.id !== me.id).map((p) => ({ id: p.id, name: p.name, role: p.role, ...(p.region === 'home' ? {} : p.state) })),
       });
       broadcast({ t: 'join', id: me.id, name: me.name, role: me.role }, me.id);
+      send(ws, { t: 'config', ...admin.publicConfig() }); // visual e regras atuais do painel admin
+      if (SETTINGS.motd) send(ws, { t: 'sys', text: `📢 ${SETTINGS.motd}` });
       console.log(`[+] ${me.name}${me.role !== 'player' ? ` (${me.role})` : ''} entrou (${players.size} online)`);
       return;
     }
@@ -255,6 +275,6 @@ setInterval(purgeExpiredSessions, 60 * 60_000);
 purgeExpiredSessions();
 
 // salva todo mundo antes de desligar (inclusive no restart do --watch)
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { game.stop(); process.exit(0); });
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { game.stop(); flushStats(); process.exit(0); });
 
 server.listen(PORT, () => console.log(`BlockQuest server em http://localhost:${PORT} (API /api, WebSocket /ws)`));

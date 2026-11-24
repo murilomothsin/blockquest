@@ -301,3 +301,9 @@ body.touch #mclose { width: 48px; height: 44px; font-size: 22px; }
 }
 
 .shopnote { margin: 0 0 10px; font-size: 13px; color: #d9cfa8; opacity: .9; }
+
+/* ícones dos pacotes do painel admin (pixel art nítida) */
+img.ico { width: 1.35em; height: 1.35em; object-fit: contain; image-rendering: pixelated; vertical-align: -0.3em; }
+.icon img.ico, .slot .icon img.ico { width: 40px; height: 40px; vertical-align: middle; }
+/* prévia dentro do painel admin: só o jogo, sem painéis que tampam a visão */
+body.preview #controls, body.preview #chat, body.preview #tutorial, body.preview #touch { display: none !important; }

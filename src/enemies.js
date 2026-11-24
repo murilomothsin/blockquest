@@ -315,7 +315,7 @@ export class EnemyManager {
   // ---------- Online: estado vindo do servidor ----------
   applySnapshot(list) {
     const now = performance.now();
-    for (const [id, ti, x, z, y, rot, hp, st, mv, wu] of list) {
+    for (const [id, ti, x, z, y, rot, hp, st, mv, wu, mhp] of list) {
       let v = this.views.get(id);
       if (!v) v = this.createView(id, TYPE_IDS[ti], x, z, rot);
       const state = STATES[st];
@@ -325,7 +325,7 @@ export class EnemyManager {
       if (state === 'dead' && v.state !== 'dead') v.deadSince = 0;
       if (Math.hypot(v.pos.x - x, v.pos.z - z) > 6) v.pos.set(x, y, z); // pulo grande: teleporta
       v.target.x = x; v.target.z = z; v.target.y = y; v.target.rot = rot;
-      v.hp = hp; v.state = state; v.moving = mv; v.windup = wu; v.lastSeen = now;
+      v.hp = hp; v.maxHp = mhp || v.maxHp; v.state = state; v.moving = mv; v.windup = wu; v.lastSeen = now;
     }
   }
 
@@ -373,7 +373,7 @@ export class EnemyManager {
       case 'windup': if (v) { v.windup = TYPES[v.type].throw.windup; this.sfx('golemWindup', at); } break;
       case 'rock': this.spawnRock(ev); break;
       case 'impact': this.sfx(ev.kind === 'dynamite' ? 'golemSlam' : 'rockImpact', at); this.dust(at, ev.r, ev.kind === 'dynamite' ? 0xff8a2a : 0xb8a990); break;
-      case 'splash': this.dust(at, ev.r, 0x9fd8ff); break;
+      case 'splash': this.dust(at, ev.r, 0x9fd8ff); this.handlers.onFx?.('magia', at, 0.8); break;
       case 'skill': {
         const S = SKILLS[ev.skill];
         const color = { giro: 0xffe08a, chuva: 0x9fe870, bola: 0xff7a2a, furtivo: 0xb46bff }[ev.skill] || 0xffffff;
@@ -467,7 +467,7 @@ export class EnemyManager {
           v.pos.set(m.x, m.y, m.z);
           v.model.root.rotation.y = m.rot;
         } else if (v.state !== 'dead') v.deadSince = 0;
-        v.hp = m.hp; v.state = m.state; v.moving = m.moving; v.windup = Math.max(0, m.windup);
+        v.hp = m.hp; v.maxHp = m.maxHp; v.state = m.state; v.moving = m.moving; v.windup = Math.max(0, m.windup);
       }
     } else {
       const now = performance.now();
@@ -537,12 +537,13 @@ export class EnemyManager {
         }
       }
 
-      const showBar = v.hp < def.hp || v.state === 'chase';
+      const mhp = v.maxHp || def.hp;
+      const showBar = v.hp < mhp || v.state === 'chase';
       v.bar.visible = showBar;
       if (showBar) {
         v.bar.position.set(v.pos.x, def.height + 0.6, v.pos.z);
         v.bar.quaternion.copy(camera.quaternion);
-        v.bar.userData.fg.scale.x = Math.max(0.001, v.hp / def.hp);
+        v.bar.userData.fg.scale.x = Math.max(0.001, Math.min(1, v.hp / mhp));
       }
     }
 

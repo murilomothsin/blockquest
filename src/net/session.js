@@ -29,6 +29,8 @@ const $ = (id) => document.getElementById(id);
  * Usa o token salvo se ainda for válido; senão mostra a tela de login.
  */
 export async function startSession() {
+  // prévia do painel admin: sempre offline, sem tela de login
+  if (new URLSearchParams(location.search).has('preview')) return { online: false, preview: true };
   const token = localStorage.getItem(TOKEN_KEY);
   if (token) {
     try {

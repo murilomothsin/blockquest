@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BlockQuest · Painel Admin</title>
+  <link rel="stylesheet" href="/src/admin/admin.css" />
+</head>
+<body>
+  <header id="top">
+    <b>🧱 BlockQuest · Painel Admin</b>
+    <nav id="tabs" class="hidden">
+      <button data-tab="visual" class="active">🎨 Visual</button>
+      <button data-tab="regras">⚙️ Regras do jogo</button>
+      <button data-tab="stats">📊 Estatísticas</button>
+      <button data-tab="reset">♻️ Resets</button>
+    </nav>
+    <span id="who"></span>
+  </header>
+
+  <section id="login" class="hidden">
+    <form id="lform" class="card">
+      <h2>Entrar no painel</h2>
+      <p class="muted">Use uma conta do jogo com cargo <b>admin</b>.</p>
+      <label>Usuário<input id="luser" autocomplete="username" maxlength="16" required /></label>
+      <label>Senha<input id="lpass" type="password" autocomplete="current-password" maxlength="128" required /></label>
+      <div id="lerror" class="err"></div>
+      <button type="submit">Entrar</button>
+    </form>
+  </section>
+
+  <main id="app" class="hidden">
+    <!-- ===== Visual ===== -->
+    <section data-pane="visual" class="pane visual">
+      <div class="controls" id="vcontrols"></div>
+      <div class="preview">
+        <div class="pbar" id="pbar"></div>
+        <iframe id="pframe" src="/?preview=1" title="Prévia do jogo"></iframe>
+        <p class="muted small">Prévia ao vivo (modo offline, só para você). Clique na prévia para jogar: WASD anda, botão direito gira a câmera. Os jogadores só veem depois de <b>Salvar para todos</b>.</p>
+      </div>
+      <div class="savebar" id="savebar">
+        <span id="dirty">Sem alterações.</span>
+        <button id="discard" class="secondary">Descartar</button>
+        <button id="save">💾 Salvar para todos os jogadores</button>
+      </div>
+    </section>
+
+    <!-- ===== Regras ===== -->
+    <section data-pane="regras" class="pane hidden">
+      <div class="card wide">
+        <h2>Regras do jogo</h2>
+        <p class="muted">Valem na hora para todo mundo (o servidor aplica). Monstros vivos ajustam a vida mantendo a porcentagem.</p>
+        <form id="rform" class="rules"></form>
+        <div class="row">
+          <button id="rdefault" class="secondary" type="button">Restaurar padrão</button>
+          <button id="rsave" type="button">💾 Salvar regras</button>
+          <span id="rmsg" class="muted"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Estatísticas ===== -->
+    <section data-pane="stats" class="pane hidden">
+      <div class="row"><button id="srefresh">🔄 Atualizar</button> <span id="sgen" class="muted"></span></div>
+      <div id="scards" class="cards"></div>
+      <div class="grid2">
+        <div class="card"><h3>⚔️ Dano por arma</h3><div id="sweapons"></div></div>
+        <div class="card"><h3>👾 Monstros</h3><div id="smobs"></div></div>
+      </div>
+      <div class="card"><h3>🏆 Ranking dos jogadores</h3><div id="sranking"></div></div>
+      <div class="card"><h3>🎒 Itens</h3><div id="sitems"></div></div>
+    </section>
+
+    <!-- ===== Resets ===== -->
+    <section data-pane="reset" class="pane hidden">
+      <div class="grid2">
+        <div class="card">
+          <h3>👤 Um jogador</h3>
+          <label>Nome do jogador<input id="xname" list="xnames" maxlength="16" placeholder="ex.: Murilo" /></label>
+          <datalist id="xnames"></datalist>
+          <div class="row">
+            <button class="secondary" data-reset="player_stats">Zerar estatísticas</button>
+            <button class="danger" data-reset="player_char">Reiniciar personagem (nível 1)</button>
+          </div>
+          <p class="muted small">Estatísticas = dano, abates, mortes, ouro ganho/perdido (o personagem continua igual). Reiniciar = personagem novo: perde nível, itens, ouro e a casa.</p>
+        </div>
+        <div class="card">
+          <h3>🌍 Todos / mundo</h3>
+          <label>Digite <b>RESETAR</b> para liberar<input id="xconfirm" maxlength="10" autocomplete="off" /></label>
+          <div class="row wrap">
+            <button class="secondary" data-reset="world">Reiniciar mundo (monstros e baús)</button>
+            <button class="secondary" data-reset="all_stats">Zerar estatísticas de todos</button>
+            <button class="danger" data-reset="all_chars">Reiniciar TODOS os personagens</button>
+          </div>
+          <p class="muted small">Mundo: todos os monstros renascem cheios no lugar de origem, baús de tesouro voltam para todo mundo. Nada disso tem desfazer.</p>
+        </div>
+      </div>
+      <div id="xmsg" class="card hidden"></div>
+    </section>
+  </main>
+
+  <div id="picker" class="modal hidden">
+    <div class="mbox">
+      <div class="mhead">
+        <b id="ptitle">Escolher</b>
+        <select id="ppack"></select>
+        <input id="psearch" placeholder="Filtrar por nome…" />
+        <button id="pclose" class="secondary">Fechar</button>
+      </div>
+      <p id="pinfo" class="muted small"></p>
+      <div id="pgrid" class="pgrid"></div>
+    </div>
+  </div>
+  <div id="toast" class="hidden"></div>
+  <script type="module" src="/src/admin/admin.js"></script>
+</body>
+</html>

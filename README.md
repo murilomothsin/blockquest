@@ -221,6 +221,25 @@ Ao morrer você **perde tudo o que carrega** (volta com uma Espada de Madeira) e
 - **Rede:** cada jogador recebe a posição só de quem está a até 120 m e na mesma área.
 - Medir no navegador: `game.perf` (ms de CPU por quadro: update e render) e `game.renderer.info.render.calls`. Servidor: `node scripts/bench-server.mjs [jogadores] [ticks]`.
 
+## Painel admin (`/admin`)
+
+Página separada para quem tem cargo **admin**: em desenvolvimento http://localhost:5199/admin, em produção http://SEU-SERVIDOR:3001/admin.
+Para virar admin: crie a conta no jogo e rode `npm run cargo -- SEU_NOME admin` (o login do painel é o mesmo do jogo).
+
+- **🎨 Visual** (com prévia ao vivo do jogo ao lado; os jogadores só veem depois de *Salvar para todos*):
+  - predefinições prontas: Original, Blocos 16×16, Kenney, Natureza 32×32;
+  - **texturas do mundo** por categoria (chão, caminhos, pedra, madeira, folhas, paredes, telhados, areia, neve, água, paredes e piso das dungeons, outros). Modo *detalhe* mantém a cor original de cada objeto/bioma e só acrescenta o desenho; modo *cor da textura* usa as cores do PNG. Escala (metros por repetição) e força ajustáveis;
+  - **ícones dos itens** (pacote padrão + troca item por item); sem pacote ficam os emojis;
+  - **efeitos de partícula**: golpe, crítico, magia, morte de monstro, cura, subir de nível (textura, cor, tamanho, quantidade, botão Testar);
+  - **vegetação**: tufos de grama pintados com a cor do bioma (densidade, tamanho, sprites);
+  - **enviar PNGs** próprios (pacotes comprados) direto pelo painel: vão para `public/packs/<categoria>/<pacote>/` e aparecem na hora.
+- **⚙️ Regras do jogo**: multiplicadores de XP, ouro, vida/dano/respawn dos monstros, item a cada N abates, % de ouro perdido por morte, nível da proteção de novato, mensagem ao entrar. O servidor aplica na hora (`src/shared/settings.js`).
+- **📊 Estatísticas**: dano causado/recebido, abates, mortes, ouro em circulação; dano por arma; por monstro (dano recebido, abates, dano nos jogadores, jogadores mortos); ranking ordenável; itens (quantos existem, quantos jogadores têm, quantos caíram/foram comprados/vendidos). Contadores em `world_stats` (SQLite) + `c.stats` em cada personagem.
+- **♻️ Resets**: zerar estatísticas ou reiniciar o personagem de um jogador; zerar estatísticas de todos; reiniciar todos os personagens; reiniciar o mundo (monstros e baús). Os coletivos exigem digitar RESETAR. Tudo vai para o `staff_log`.
+
+Pacotes incluídos (todos **CC0**, uso comercial livre): Kenney Voxel Pack, Kenney Particle Pack, Kenney Foliage Sprites, 496 RPG Icons (7Soul1), 16×16 Block Texture Set e 16*16 Block Textures, Assorted Minecraft-style textures, 16 pixelated nature textures — fontes no `pack.json` de cada pasta.
+Configuração: `config` (SQLite) → `GET /api/config` (público) e mensagem `{t:'config'}` para quem está online. Rotas do painel: `/api/admin/*` (só admin). Teste: `npm run test:admin`.
+
 ## Sons
 
 Todos os sons são sintetizados com Web Audio (`src/audio.js`), com volume e pan pela posição. Para usar arquivos de verdade, coloque os áudios em `public/sounds/` e mapeie em `public/sounds/sounds.json`, por exemplo `{ "swing": "espada.mp3" }`. A lista de nomes está no próprio json.
@@ -243,6 +262,7 @@ scripts/
   test-*.mjs     testes do servidor: test-server (economia/cargos), test-chat, test-mina (classes, casa, mina, baús, morte), test-expansao (torre, pergaminhos, castelo)
   balance.mjs    análise de balanceamento (números)
   bench-server.mjs  custo do tick do servidor com N jogadores
+  test-admin.mjs painel admin: permissões, config, upload, estatísticas, resets
 src/
   shared/        código usado pelo navegador E pelo servidor:
     progress.js    regras do personagem: XP, ouro, loja, equipar, poções, missões, baús, casa, portas, classe, morte

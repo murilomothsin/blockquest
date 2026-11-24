@@ -9,6 +9,7 @@
 //   {k:'respawn', pos} {k:'heal', n, color} {k:'pickup', item, n?} {k:'equip', item} {k:'closeDialog'}
 //   {k:'teleport', x, z, region} {k:'chest', id} {k:'classChosen', cls} {k:'skillUp', node} {k:'buff', id, until}
 import { ITEMS, SLOTS, SHOP_LISTS, FARM, rollDrop, rollTreasure, damageReduction } from './items.js';
+import { SETTINGS } from './settings.js';
 import { QUESTS } from './quests.js';
 import { TYPES } from './mobs.js';
 import {
@@ -26,6 +27,7 @@ export const sellersOf = (id) => SHOPS.filter((n) => SHOP_LISTS[n.sells]?.includ
 
 export const HP_BASE = 100;
 export const HP_PER_LEVEL = 15;
+// valores padrão; os que valem de verdade vêm de SETTINGS (painel admin)
 export const DROP_EVERY = 5; // a cada 5 abates cai um baú
 export const DEATH_STEP = 0.1; // cada morte no período tira +10% do ouro (10%, 20%, 30%...)
 export const DEATH_PERIOD_MS = 2 * 86400_000; // zera a cada 2 dias, à meia-noite UTC
@@ -42,8 +44,13 @@ export const defenseOf = (c) => (ITEMS[c.armor]?.def || 0) + (ITEMS[c.helmet]?.d
 export const isEquipped = (c, id) => id === c.equipped || id === c.armor || id === c.helmet;
 export const deathPeriod = (ms) => Math.floor(ms / DEATH_PERIOD_MS);
 /** % de ouro que a PRÓXIMA morte vai tirar */
-export const nextDeathPct = (c, ms = Date.now()) => Math.min(100, Math.round(((c.deaths?.period === deathPeriod(ms) ? c.deaths.n : 0) + 1) * DEATH_STEP * 100));
+export const nextDeathPct = (c, ms = Date.now()) => Math.min(100, Math.round(((c.deaths?.period === deathPeriod(ms) ? c.deaths.n : 0) + 1) * SETTINGS.deathStep));
+export const noviceLevel = () => SETTINGS.noviceLevel;
 export const treasureLeft = (c, t, ms = Date.now()) => Math.max(0, (c.chests?.[t.id] || 0) + TREASURE_RESPAWN[t.tier] * 1000 - ms);
+
+/** estatísticas para o painel admin (o servidor soma; zeráveis pelo admin) */
+export const STAT_KEYS = ['dmg', 'taken', 'deaths', 'goldEarned', 'goldLost', 'bossKills', 'items'];
+export const newStats = () => Object.fromEntries(STAT_KEYS.map((k) => [k, 0]));
 
 export function newCharacter() {
   return {
@@ -51,6 +58,7 @@ export function newCharacter() {
     inv: { potion: 3, wood_sword: 1 }, equipped: 'wood_sword', armor: null, helmet: null,
     quest: { idx: 0, status: 'available', progress: 0 }, pos: [...SPAWN_POINT],
     cls: null, skills: {}, chests: {}, home: { rack: {}, chest: {}, safe: 0 }, deaths: { period: 0, n: 0 }, buffs: {}, farm: {},
+    stats: newStats(),
   };
 }
 
@@ -101,6 +109,7 @@ export function normalizeCharacter(d) {
     home: { rack: cleanBag(h.rack, gearOk), chest: cleanBag(h.chest, potionOk), safe: int(h.safe, 0, 1e9, 0) },
     deaths: { period: int(d.deaths?.period, 0, 1e7, 0), n: int(d.deaths?.n, 0, 1000, 0) },
     buffs: {}, farm: {},
+    stats: Object.fromEntries(STAT_KEYS.map((k) => [k, int(d.stats?.[k], 0, 1e12, 0)])),
   };
   if (d.farm && typeof d.farm === 'object') { // monstros abatidos há pouco (anti-farm), no máximo 300
     for (const [k, t] of Object.entries(d.farm).slice(0, 300)) if (typeof k === 'string' && k.length < 40 && Number.isFinite(t) && now - t < FARM.window) c.farm[k] = t;
@@ -119,11 +128,12 @@ export function normalizeCharacter(d) {
 
 /** Só o que vai para o cliente / banco (sem campos de runtime) */
 export function publicCharacter(c) {
-  const { level, xp, gold, maxHp, hp, kills, inv, equipped, armor, helmet, quest, pos, cls, skills, chests, home, deaths, buffs, farm } = c;
+  const { level, xp, gold, maxHp, hp, kills, inv, equipped, armor, helmet, quest, pos, cls, skills, chests, home, deaths, buffs, farm, stats } = c;
   return {
     level, xp, gold, maxHp, hp: Math.ceil(hp), kills, inv: { ...inv }, equipped, armor, helmet, quest: { ...quest }, pos: [...pos],
     cls: cls || null, skills: { ...skills }, chests: { ...chests },
     home: { rack: { ...home.rack }, chest: { ...home.chest }, safe: home.safe }, deaths: { ...deaths }, buffs: { ...(buffs || {}) }, farm: { ...(farm || {}) },
+    stats: { ...(stats || newStats()) },
   };
 }
 
@@ -151,7 +161,7 @@ export function gainXp(c, n, fx) {
     fx.push({ k: 'log', text: `Você subiu para o nível ${c.level}! Vida máxima: ${c.maxHp}`, cls: 'good' });
     if (c.level === CLASS_LEVEL && !c.cls) fx.push({ k: 'log', text: '⭐ Você já pode escolher sua classe! Aperte K.', cls: 'good' }, { k: 'chooseClass' });
     else if (c.cls) fx.push({ k: 'log', text: '⭐ +1 ponto de habilidade (K para abrir a árvore).', cls: 'good' });
-    if (c.level === NOVICE_MAX_LEVEL + 1) {
+    if (c.level === SETTINGS.noviceLevel + 1) {
       fx.push({ k: 'log', text: '⚠️ Fim da proteção de novato: agora, ao morrer, você perde tudo o que carrega. Guarde um equipamento reserva no armário da sua casa!', cls: 'bad' });
     }
   }
@@ -199,13 +209,16 @@ export function kill(c, type, at, ctx, fx, key = null) {
     const keys = Object.keys(c.farm);
     if (keys.length > 300) for (const k of keys) if (clock - c.farm[k] >= FARM.window) delete c.farm[k];
   }
-  const g = def.gold[0] + Math.floor(rand() * (def.gold[1] - def.gold[0] + 1));
+  const g = Math.round((def.gold[0] + Math.floor(rand() * (def.gold[1] - def.gold[0] + 1))) * SETTINGS.goldMul);
   c.gold += g;
   c.kills++;
+  const st = (c.stats ||= newStats());
+  st.goldEarned += g;
+  if (def.boss) st.bossKills++;
   fx.push({ k: 'sfx', name: 'coin', at });
   fx.push({ k: 'float', text: `+${g} 🪙`, color: '#ffd65c', size: 16, at, h: def.height + 1 });
   fx.push({ k: 'log', text: `${def.name} derrotado! +${g} 🪙`, cls: 'gold' });
-  if (c.kills % DROP_EVERY === 0 && (!farmed || rand() < FARM.dropChance)) {
+  if (c.kills % SETTINGS.dropEvery === 0 && (!farmed || rand() < FARM.dropChance)) {
     ctx.loot.add(rollDrop(false, rand, farmed), at.x, at.z, ctx.now, fx);
     fx.push({ k: 'sfx', name: 'drop', at });
     fx.push({ k: 'log', text: '🎁 Um item caiu! Encoste nele para pegar.', cls: 'good' });
@@ -229,7 +242,7 @@ export function kill(c, type, at, ctx, fx, key = null) {
       fx.push({ k: 'log', text: `Missão concluída! Volte para ${giver.title} ${giver.where}.`, cls: 'info' });
     }
   }
-  gainXp(c, def.xp, fx);
+  gainXp(c, Math.max(1, Math.round(def.xp * SETTINGS.xpMul)), fx);
 }
 
 // ---------- Dano / morte ----------
@@ -248,6 +261,7 @@ export function hurt(c, dmg, type, ctx, fx) {
   }
   const real = Math.max(1, Math.round(dmg * (0.85 + rand() * 0.3) * (1 - damageReduction(defenseOf(c)))));
   c.hp = Math.max(0, c.hp - real);
+  (c.stats ||= newStats()).taken += real;
   fx.push({ k: 'hurt', dmg: real });
   if (c.hp <= 0) {
     c.dead = true;
@@ -255,10 +269,12 @@ export function hurt(c, dmg, type, ctx, fx) {
     const period = deathPeriod(ms);
     if (c.deaths.period !== period) c.deaths = { period, n: 0 };
     c.deaths.n++;
-    const pct = Math.min(100, Math.round(c.deaths.n * DEATH_STEP * 100));
+    const pct = Math.min(100, Math.round(c.deaths.n * SETTINGS.deathStep));
     const lost = Math.floor((c.gold * pct) / 100);
     c.gold -= lost;
-    const novice = c.level <= NOVICE_MAX_LEVEL;
+    c.stats.deaths++;
+    c.stats.goldLost += lost;
+    const novice = c.level <= SETTINGS.noviceLevel;
     let items = 0;
     if (!novice) { // perde tudo o que carrega
       items = Object.values(c.inv).reduce((s, n) => s + n, 0) - (c.inv.wood_sword && c.equipped === 'wood_sword' ? 1 : 0);
@@ -409,9 +425,11 @@ export function act(c, a, ctx, fx) {
       ctx.loot.items.delete(a.lid);
       if (l.item === 'gold') {
         c.gold += l.n;
+        (c.stats ||= newStats()).goldEarned += l.n;
         fx.push({ k: 'lootGone', lid: a.lid }, { k: 'sfx', name: 'coin' }, { k: 'pickup', item: 'gold', n: l.n });
       } else {
         addItem(c.inv, l.item);
+        (c.stats ||= newStats()).items++;
         fx.push({ k: 'lootGone', lid: a.lid }, { k: 'sfx', name: 'pickup' }, { k: 'pickup', item: l.item });
       }
       return true;

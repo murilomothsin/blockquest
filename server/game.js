@@ -4,9 +4,11 @@
 import { MobSim, TYPES } from '../src/shared/mobs.js';
 import { buildLayout, createWorldQueries, WORLD_RADIUS, SPAWN_POINT, regionAt, dungeonAt } from '../src/shared/worldData.js';
 import { ITEMS } from '../src/shared/items.js';
-import { LootBag, act, kill, hurt, publicCharacter } from '../src/shared/progress.js';
+import { LootBag, act, kill, hurt, publicCharacter, newCharacter, newStats } from '../src/shared/progress.js';
+import { mobMaxHp } from '../src/shared/mobs.js';
 import { playerAttack, playerSkill } from '../src/shared/combatRules.js';
 import { saveCharacter } from './auth.js';
+import { bump } from './stats.js';
 
 const TICK_MS = 50; // simulação a 20 Hz
 const SNAP_EVERY = 2; // estado dos monstros a 10 Hz
@@ -29,6 +31,7 @@ export function createGame({ players, send }) {
   /** manda o personagem atualizado + efeitos para o jogador */
   function pushFx(p, fx) {
     p.dirty = true;
+    for (const f of fx) if (f.k === 'loot') bump(`drop:${f.item}`, f.item === 'gold' ? f.n || 1 : 1); // painel: o que está caindo
     send(p.ws, { t: 'fx', c: { ...publicCharacter(p.c), dead: !!p.c.dead }, fx });
   }
   const ctxOf = (p) => ({ pos: p.lastPos, now: nowS(), clock: Date.now(), rand: Math.random, loot: p.loot, god: p.god });
@@ -38,11 +41,23 @@ export function createGame({ players, send }) {
       const p = players.get(ev.pid);
       if (!p || p.c.dead) return;
       const fx = [];
-      hurt(p.c, ev.dmg, ev.type, ctxOf(p), fx);
+      const real = hurt(p.c, ev.dmg, ev.type, ctxOf(p), fx);
+      if (real) { bump('taken', real); bump(`taken_mob:${ev.type}`, real); }
+      const death = fx.find((f) => f.k === 'death');
+      if (death) { bump('deaths'); bump(`death_by:${ev.type}`); bump('gold_lost', death.lost); }
       if (fx.length) pushFx(p, fx);
       return;
     }
+    if (ev.e === 'hurt' && ev.by != null) { // dano causado pelos jogadores (painel admin)
+      const p = players.get(ev.by);
+      const type = sim.byId.get(ev.id)?.type;
+      const dmg = Math.max(0, Math.round(ev.dmg));
+      bump('dmg', dmg);
+      if (type) bump(`dmg_mob:${type}`, dmg);
+      if (p) { (p.c.stats ||= newStats()).dmg += dmg; bump(`dmg_weapon:${p.c.equipped}`, dmg); p.dirty = true; }
+    }
     if (ev.e === 'killed') { // recompensa para todo mundo que ajudou
+      bump('kills'); bump(`kills:${ev.type}`);
       for (const pid of ev.credit) {
         const p = players.get(pid);
         if (!p) continue;
@@ -142,6 +157,7 @@ export function createGame({ players, send }) {
   function handleAct(p, a) {
     const fx = [];
     const changed = act(p.c, a, ctxOf(p), fx);
+    if (changed && (a.a === 'buy' || a.a === 'sell') && ITEMS[a.id]) bump(`${a.a}:${a.id}`);
     if (a.a === 'respawn' && changed) teleport(p, SPAWN_POINT[0], SPAWN_POINT[2]);
     const tp = fx.find((f) => f.k === 'teleport'); // portas da mina e da casa
     if (tp) teleport(p, tp.x, tp.z);
@@ -178,7 +194,41 @@ export function createGame({ players, send }) {
     return n;
   }
 
+  // ---------- painel admin ----------
+  /** multiplicador de vida mudou: os monstros vivos acompanham (mantendo a % de vida) */
+  function applySettingsLive() {
+    for (const m of sim.mobs) {
+      const k = m.maxHp ? m.hp / m.maxHp : 1;
+      m.maxHp = mobMaxHp(m.def);
+      if (m.state !== 'dead') m.hp = Math.max(1, Math.round(m.maxHp * k));
+    }
+  }
+  /** personagem novo (nível 1) para quem está online; volta para a vila */
+  function resetCharacterOnline(p, msg) {
+    p.c = newCharacter();
+    const fx = [];
+    if (p.loot) { for (const l of p.loot.list()) fx.push({ k: 'lootGone', lid: l.lid }); p.loot = new LootBag(); }
+    teleport(p, SPAWN_POINT[0], SPAWN_POINT[2]);
+    fx.push({ k: 'log', text: msg, cls: 'bad' }, { k: 'closeDialog' });
+    pushFx(p, fx);
+    safeSave(p);
+  }
+  /** mundo do zero: monstros renascem cheios no lugar de origem, baús de tesouro e anti-farm liberados */
+  function resetWorld() {
+    const n = sim.resetAll();
+    for (const p of players.values()) {
+      const fx = [];
+      for (const l of p.loot?.list() || []) fx.push({ k: 'lootGone', lid: l.lid });
+      p.loot = new LootBag();
+      p.c.chests = {}; p.c.farm = {};
+      fx.push({ k: 'log', text: '🌍 O mundo foi reiniciado pela administração: monstros e baús de tesouro voltaram.', cls: 'info' });
+      pushFx(p, fx);
+    }
+    return n;
+  }
+
   return {
+    applySettingsLive, resetCharacterOnline, resetWorld, safeSave,
     sim, TYPES, ITEMS, join, leave, handleState, handleAct, handleHit, handleSkill, teleport, pushFx, spawnNear, killNear, saveAll,
     stop: () => { clearInterval(timer); saveAll(true); },
   };
