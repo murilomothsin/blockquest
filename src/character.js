@@ -13,7 +13,7 @@ function box(w, h, d, color) {
  */
 export function createCharacter({
   skin = 0xf5c99b, shirt = 0x2f6fdf, pants = 0x333a4a, hair = 0x4a2f1b,
-  eyes = 0x111111, scale = 1, weapon = false, swordColor = 0xcfd6de,
+  eyes = 0x111111, scale = 1, weapon = false, swordColor = 0xcfd6de, bow = false,
 } = {}) {
   const s = 0.5 * scale;
   const root = new THREE.Group();
@@ -80,10 +80,27 @@ export function createCharacter({
     armR.add(sword);
   }
 
+  let bowMesh = null;
+  if (bow) {
+    // Arco na mão esquerda: arco de torus no plano YZ do braço, barriga apontando pra frente ao mirar
+    bowMesh = new THREE.Group();
+    const r = 1.15 * s;
+    const limbs = new THREE.Mesh(new THREE.TorusGeometry(r, 0.12 * s, 6, 16, Math.PI), new THREE.MeshLambertMaterial({ color: 0x9a6a3a }));
+    limbs.rotation.y = Math.PI / 2;
+    limbs.castShadow = true;
+    const str = new THREE.Mesh(new THREE.BoxGeometry(0.04 * s, 0.04 * s, 2 * r), new THREE.MeshBasicMaterial({ color: 0xeeeeee }));
+    bowMesh.add(limbs, str);
+    bowMesh.rotation.x = Math.PI;
+    bowMesh.position.set(0, -2.2 * s + r, 0);
+    bowMesh.userData.limb = limbs;
+    bowMesh.visible = false;
+    armL.add(bowMesh);
+  }
+
   const materials = [];
   root.traverse((o) => { if (o.isMesh && o.material.emissive) materials.push(o.material); });
 
-  return { root, body, legL, legR, armL, armR, head, sword, materials, height: 5.2 * s };
+  return { root, body, legL, legR, armL, armR, head, sword, bow: bowMesh, materials, height: 5.2 * s };
 }
 
 /** attack: 0..1 (1 = início do golpe) */

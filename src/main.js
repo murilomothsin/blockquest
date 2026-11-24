@@ -2,9 +2,12 @@ import * as THREE from 'three';
 import { buildWorld, makeLabel } from './world.js';
 import { createCharacter, animateCharacter, flash } from './character.js';
 import { EnemyManager } from './enemies.js';
-import { QUESTS, WEAPONS } from './quests.js';
-import { Input } from './input.js';
+import { QUESTS } from './quests.js';
+import { ITEMS, ATTACK, rollDrop } from './items.js';
+import { Input, keyLabel } from './input.js';
 import { UI } from './ui.js';
+import { Projectiles } from './combat.js';
+import { Loot } from './loot.js';
 
 // ---------- Render ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -35,18 +38,34 @@ scene.add(sun, sun.target);
 
 const world = buildWorld(scene);
 const enemies = new EnemyManager(scene, world);
-const ui = new UI();
 const input = new Input(renderer.domElement);
+const ui = new UI(input);
+const loot = new Loot(scene);
+const projectiles = new Projectiles(scene, world, enemies, (hit) => reportHits([hit]));
 
 // ---------- Save ----------
-const SAVE_KEY = 'blockquest-save-v1';
-const DEFAULTS = { level: 1, xp: 0, gold: 10, potions: 3, weaponLvl: 0, maxHp: 100, hp: 100, quest: { idx: 0, status: 'available', progress: 0 }, pos: [0, 0, 8] };
+const SAVE_KEY = 'blockquest-save-v2';
+const DEFAULTS = {
+  level: 1, xp: 0, gold: 10, maxHp: 100, hp: 100, kills: 0,
+  inv: { potion: 3, wood_sword: 1 }, equipped: 'wood_sword',
+  quest: { idx: 0, status: 'available', progress: 0 }, pos: [0, 0, 8],
+};
 function load() {
-  try { return { ...structuredClone(DEFAULTS), ...JSON.parse(localStorage.getItem(SAVE_KEY) || '{}') }; } catch { return structuredClone(DEFAULTS); }
+  try {
+    let s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+    const old = !s && JSON.parse(localStorage.getItem('blockquest-save-v1') || 'null');
+    if (old) { // migra save antigo (weaponLvl/potions) para inventário
+      const eq = ['wood_sword', 'iron_sword', 'steel_sword', 'rune_blade'][old.weaponLvl || 0];
+      s = { ...old, inv: { potion: old.potions || 0, wood_sword: 1, [eq]: 1 }, equipped: eq };
+    }
+    const merged = { ...structuredClone(DEFAULTS), ...(s || {}) };
+    if (!ITEMS[merged.equipped]) merged.equipped = 'wood_sword';
+    return merged;
+  } catch { return structuredClone(DEFAULTS); }
 }
 function save() {
-  const { level, xp, gold, potions, weaponLvl, maxHp, hp, quest } = player;
-  localStorage.setItem(SAVE_KEY, JSON.stringify({ level, xp, gold, potions, weaponLvl, maxHp, hp: Math.ceil(hp), quest, pos: [player.pos.x, 0, player.pos.z] }));
+  const { level, xp, gold, maxHp, hp, kills, inv, equipped, quest } = player;
+  localStorage.setItem(SAVE_KEY, JSON.stringify({ level, xp, gold, maxHp, hp: Math.ceil(hp), kills, inv, equipped, quest, pos: [player.pos.x, 0, player.pos.z] }));
 }
 const saved = load();
 
@@ -57,17 +76,25 @@ const player = {
   vy: 0, rotY: Math.PI, onGround: true, dead: false,
   attackCd: 0, attackAnim: 0, lastHurt: -99, t: 0,
 };
-const hero = createCharacter({ shirt: 0xd9433b, pants: 0x2b3a67, hair: 0x3b2414, weapon: true });
+const hero = createCharacter({ shirt: 0xd9433b, pants: 0x2b3a67, hair: 0x3b2414, weapon: true, bow: true });
 scene.add(hero.root);
-function refreshWeapon() { hero.sword.userData.blade.material.color.setHex(WEAPONS[player.weaponLvl].color); }
+
+const weapon = () => ITEMS[player.equipped];
+function refreshWeapon() {
+  const w = weapon();
+  hero.sword.visible = w.style === 'melee';
+  hero.bow.visible = w.style === 'ranged';
+  (w.style === 'melee' ? hero.sword.userData.blade : hero.bow.userData.limb).material.color.setHex(w.color);
+}
 refreshWeapon();
 
 const xpToNext = (l) => Math.floor(50 * Math.pow(l, 1.5));
 const facing = () => new THREE.Vector3(Math.sin(player.rotY), 0, Math.cos(player.rotY));
-const headPos = (p, h = 2.8) => new THREE.Vector3(p.x, h, p.z);
+const headPos = (p, hgt = 2.8) => new THREE.Vector3(p.x, hgt, p.z);
+const distXZ = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
 function rollDamage() {
-  const base = 10 + player.level * 3 + WEAPONS[player.weaponLvl].bonus;
+  const base = 10 + player.level * 3 + weapon().bonus;
   const crit = Math.random() < 0.15;
   const dmg = Math.round(base * (0.85 + Math.random() * 0.3) * (crit ? 2 : 1));
   return { dmg, crit };
@@ -86,6 +113,52 @@ function gainXp(n) {
   }
   save();
 }
+
+// ---------- Itens ----------
+function addItem(id, n = 1) { player.inv[id] = (player.inv[id] || 0) + n; }
+function removeItem(id, n = 1) {
+  player.inv[id] = (player.inv[id] || 0) - n;
+  if (player.inv[id] <= 0) delete player.inv[id];
+}
+function equip(id) {
+  if (!player.inv[id] || ITEMS[id].kind !== 'weapon') return;
+  player.equipped = id;
+  refreshWeapon();
+  lockTarget = null;
+  ui.log(`Equipou ${ITEMS[id].icon} ${ITEMS[id].name}.`, 'info');
+  save();
+}
+function useItem(id) {
+  const it = ITEMS[id];
+  if (it.kind !== 'consumable') return;
+  if (!player.inv[id]) return ui.log(`Sem ${it.name}! Compre com a Mercadora Lia.`, 'bad');
+  if (player.dead) return;
+  if (player.hp >= player.maxHp) return ui.log('Vida já está cheia.', 'info');
+  removeItem(id);
+  const heal = Math.round(player.maxHp * it.heal);
+  player.hp = Math.min(player.maxHp, player.hp + heal);
+  ui.float(headPos(player.pos), `+${heal}`, '#7dff7d', 22);
+  save();
+}
+function buy(id) {
+  const it = ITEMS[id];
+  if (player.gold < it.price) return;
+  player.gold -= it.price;
+  addItem(id);
+  ui.log(`Comprou ${it.icon} ${it.name}.`, 'gold');
+  if (it.kind === 'weapon') equip(id);
+  save();
+}
+function sell(id) {
+  const it = ITEMS[id];
+  if (!player.inv[id]) return;
+  if (id === player.equipped && player.inv[id] <= 1) return;
+  removeItem(id);
+  player.gold += it.sell;
+  ui.log(`Vendeu ${it.icon} ${it.name} por ${it.sell} ouro.`, 'gold');
+  save();
+}
+ui.setGame({ player, buy, sell, use: useItem, equip });
 
 // ---------- NPCs ----------
 const npcs = [
@@ -121,65 +194,153 @@ function setMarker(t) {
 }
 
 function talk(npc) {
+  if (npc.id === 'merchant') { ui.shopTab = 'buy'; return ui.openModal('shop'); }
   const q = player.quest, def = QUESTS[q.idx];
-  if (npc.id === 'elder') {
-    if (q.status === 'done') return ui.dialog(npc.name, 'Graças a você a Vila Pedraverde está em paz. Novas aventuras virão em breve...');
-    if (q.status === 'available') {
-      return ui.dialog(`${npc.name} — ${def.title}`, def.intro, [{
-        label: 'Aceitar missão', onClick: () => {
-          q.status = 'active'; q.progress = 0;
-          ui.log(`Missão aceita: ${def.title}`, 'info'); ui.closeDialog(); save();
-        },
-      }]);
-    }
-    if (q.status === 'active') return ui.dialog(npc.name, `${def.progressText(q.progress, def.count)}. Vá até ${def.where.label} (siga a ★ no mapa).`);
-    if (q.status === 'complete') {
-      return ui.dialog(npc.name, def.doneText, [{
-        label: 'Receber recompensa', onClick: () => {
-          const r = def.reward;
-          player.gold += r.gold || 0;
-          player.potions += r.potions || 0;
-          if (r.weapon) { player.weaponLvl = Math.max(player.weaponLvl, r.weapon); refreshWeapon(); ui.log(`Nova arma: ${WEAPONS[player.weaponLvl].name}!`, 'good'); }
-          ui.log(`Recompensa: ${r.gold} ouro${r.potions ? `, ${r.potions} poções` : ''}`, 'gold');
-          q.idx++; q.progress = 0;
-          q.status = q.idx < QUESTS.length ? 'available' : 'done';
-          ui.closeDialog();
-          gainXp(r.xp);
-        },
-      }]);
-    }
+  if (q.status === 'done') return ui.dialog(npc.name, 'Graças a você a Vila Pedraverde está em paz. Novas aventuras virão em breve...');
+  if (q.status === 'available') {
+    return ui.dialog(`${npc.name} — ${def.title}`, def.intro, [{
+      label: 'Aceitar missão', onClick: () => {
+        q.status = 'active'; q.progress = 0;
+        ui.log(`Missão aceita: ${def.title}`, 'info'); ui.closeDialog(); save();
+      },
+    }]);
   }
-  if (npc.id === 'merchant') {
-    const next = WEAPONS[player.weaponLvl + 1];
-    const wCost = 120 * (player.weaponLvl + 1);
-    const buttons = [{
-      label: 'Poção de vida — 15 🪙', disabled: player.gold < 15, onClick: () => {
-        player.gold -= 15; player.potions++; ui.log('Comprou 1 poção.', 'gold'); save(); talk(npc);
+  if (q.status === 'active') return ui.dialog(npc.name, `${def.progressText(q.progress, def.count)}. Vá até ${def.where.label} (siga a ★ no mapa).`);
+  if (q.status === 'complete') {
+    return ui.dialog(npc.name, def.doneText, [{
+      label: 'Receber recompensa', onClick: () => {
+        const r = def.reward;
+        player.gold += r.gold || 0;
+        const got = [];
+        for (const [id, n] of Object.entries(r.items || {})) { addItem(id, n); got.push(`${n}x ${ITEMS[id].name}`); }
+        ui.log(`Recompensa: ${r.gold} ouro${got.length ? `, ${got.join(', ')}` : ''}`, 'gold');
+        for (const id of Object.keys(r.items || {})) {
+          const it = ITEMS[id];
+          if (it.kind === 'weapon' && it.style === weapon().style && it.bonus > weapon().bonus) equip(id);
+        }
+        q.idx++; q.progress = 0;
+        q.status = q.idx < QUESTS.length ? 'available' : 'done';
+        ui.closeDialog();
+        gainXp(r.xp);
       },
-    }];
-    if (next) buttons.push({
-      label: `${next.name} — ${wCost} 🪙`, disabled: player.gold < wCost, onClick: () => {
-        player.gold -= wCost; player.weaponLvl++; refreshWeapon();
-        ui.log(`Comprou ${next.name}!`, 'good'); save(); talk(npc);
-      },
-    });
-    ui.dialog(npc.name, `Bem-vindo à minha banca! Você tem ${player.gold} de ouro. Arma atual: ${WEAPONS[player.weaponLvl].name}.`, buttons);
+    }]);
   }
 }
 
+// ---------- Mira / alvo ----------
+let lockTarget = null;
+let autoTarget = null;
+const ring = new THREE.Mesh(
+  new THREE.RingGeometry(0.85, 1.1, 32),
+  new THREE.MeshBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }),
+);
+ring.rotation.x = -Math.PI / 2;
+ring.visible = false;
+scene.add(ring);
+const raycaster = new THREE.Raycaster();
+
+const alive = (e) => e && e.state !== 'dead';
+const maxLockRange = () => (weapon().style === 'ranged' ? weapon().range + 6 : 30);
+
+function findAutoTarget(range) {
+  const camF = new THREE.Vector3(-Math.sin(cam.yaw), 0, -Math.cos(cam.yaw));
+  const f = facing();
+  let best = null, bestD = Infinity;
+  for (const e of enemies.list) {
+    if (!alive(e)) continue;
+    const d = distXZ(e.pos, player.pos);
+    if (d > range) continue;
+    const dir = new THREE.Vector3(e.pos.x - player.pos.x, 0, e.pos.z - player.pos.z).normalize();
+    if (Math.max(dir.dot(f), dir.dot(camF)) < 0.5 && d > 4) continue; // cone de ~60°
+    if (d < bestD) { best = e; bestD = d; }
+  }
+  return best;
+}
+
+function cycleTarget() {
+  const list = enemies.list.filter((e) => alive(e) && distXZ(e.pos, player.pos) < 30)
+    .sort((a, b) => distXZ(a.pos, player.pos) - distXZ(b.pos, player.pos));
+  if (!list.length) { lockTarget = null; return; }
+  lockTarget = list[(list.indexOf(lockTarget) + 1) % list.length];
+}
+
+function pickEnemyAt(x, y) {
+  raycaster.setFromCamera(new THREE.Vector2((x / innerWidth) * 2 - 1, -(y / innerHeight) * 2 + 1), camera);
+  const roots = enemies.list.filter(alive).map((e) => e.model.root);
+  for (const hit of raycaster.intersectObjects(roots, true)) {
+    let o = hit.object;
+    while (o && !o.userData.enemy) o = o.parent;
+    if (o) return o.userData.enemy;
+  }
+  return null;
+}
+
+function currentTarget() {
+  if (alive(lockTarget) && distXZ(lockTarget.pos, player.pos) <= maxLockRange()) return lockTarget;
+  return weapon().style === 'ranged' ? autoTarget : null;
+}
+
 // ---------- Combate ----------
+function reportHits(hits) {
+  for (const hh of hits) {
+    ui.float(headPos(hh.enemy.pos, hh.enemy.def.height + 0.4), hh.crit ? `${hh.dmg}!` : `${hh.dmg}`, hh.crit ? '#ffd84a' : '#ffffff', hh.crit ? 28 : 20);
+    if (hh.killed) onKill(hh.enemy);
+  }
+}
+
+function attack() {
+  const w = weapon();
+  const tgt = currentTarget();
+  if (tgt && (w.style === 'ranged' || distXZ(tgt.pos, player.pos) < 5)) {
+    player.rotY = Math.atan2(tgt.pos.x - player.pos.x, tgt.pos.z - player.pos.z);
+  }
+  player.attackAnim = 1;
+  player.attackCd = ATTACK[w.style].cooldown;
+  if (w.style === 'ranged') {
+    setTimeout(() => {
+      if (player.dead) return;
+      const from = new THREE.Vector3(player.pos.x, player.pos.y + 1.9, player.pos.z).addScaledVector(facing(), 0.7);
+      projectiles.fire(from, alive(tgt) ? tgt : null, facing(), w.range, rollDamage);
+    }, 160);
+  } else {
+    setTimeout(() => {
+      if (player.dead) return;
+      reportHits(enemies.hitArc(player.pos, facing(), ATTACK.melee.range, rollDamage));
+    }, 140);
+  }
+}
+
 function onKill(e) {
   const g = e.def.gold[0] + Math.floor(Math.random() * (e.def.gold[1] - e.def.gold[0] + 1));
   player.gold += g;
+  player.kills++;
   ui.float(headPos(e.pos, e.def.height + 1), `+${g} 🪙`, '#ffd65c', 16);
   ui.log(`${e.def.name} derrotado! +${g} ouro`, 'gold');
-  if (Math.random() < (e.def.boss ? 1 : 0.15)) { player.potions++; ui.log('Encontrou uma poção!', 'good'); }
+  if (lockTarget === e) lockTarget = null;
+  // a cada 5 abates cai um item; chefe sempre deixa uma arma rara
+  if (player.kills % 5 === 0) {
+    loot.drop(rollDrop(), e.pos);
+    ui.log('🎁 Um item caiu! Encoste no baú para pegar.', 'good');
+  }
+  if (e.def.boss) {
+    loot.drop(rollDrop(true), new THREE.Vector3(e.pos.x + 1.5, 0, e.pos.z));
+    ui.log('🎁 O chefe deixou cair uma arma rara!', 'good');
+  }
   const q = player.quest, def = QUESTS[q.idx];
   if (q.status === 'active' && def.target === e.type) {
     q.progress++;
     if (q.progress >= def.count) { q.status = 'complete'; ui.log(`Missão concluída! Volte ao ${elder.name}.`, 'info'); }
   }
   gainXp(e.def.xp);
+}
+
+function onPickup(id) {
+  const it = ITEMS[id];
+  addItem(id);
+  ui.float(headPos(player.pos, 3.4), `${it.icon} ${it.name}`, it.kind === 'weapon' ? '#d9b3ff' : '#b8ffb0', 18);
+  ui.log(`Pegou ${it.icon} ${it.name}!${it.kind === 'weapon' ? ` Abra o inventário [${keyLabel(input.bindings.inventory.find(Boolean))}] para equipar.` : ''}`, 'good');
+  ui.refresh();
+  save();
 }
 
 function onPlayerHit(dmg, e) {
@@ -192,10 +353,11 @@ function onPlayerHit(dmg, e) {
   ui.float(headPos(player.pos), `-${real}`, '#ff5d5d', 22);
   if (player.hp <= 0) {
     player.hp = 0; player.dead = true;
+    lockTarget = null;
     const lost = Math.floor(player.gold * 0.1);
     player.gold -= lost;
     ui.log(`Você foi derrotado por ${e.def.name}.`, 'bad');
-    ui.closeDialog();
+    ui.closeDialog(); ui.closeModal();
     ui.death(true, () => {
       player.dead = false; player.hp = player.maxHp;
       player.pos.set(0, 0, 8); player.vy = 0;
@@ -223,11 +385,20 @@ function update(dt) {
     cam.pitch = THREE.MathUtils.clamp(cam.pitch + input.dy * 0.004, 0.05, 1.35);
   }
   cam.dist = THREE.MathUtils.clamp(cam.dist + input.wheel * 1.2, 5, 28);
-  if (input.down('KeyQ')) cam.yaw += dt * 2;
-  if (input.down('KeyR')) cam.yaw -= dt * 2;
+  if (input.held('camLeft')) cam.yaw += dt * 2;
+  if (input.held('camRight')) cam.yaw -= dt * 2;
+
+  // atalhos de interface
+  if (input.tapped('Escape')) {
+    if (ui.modal) ui.closeModal();
+    else if (ui.dialogOpen) ui.closeDialog();
+    else lockTarget = null;
+  }
+  if (input.hit('help')) ui.toggleHelp();
+  if (input.hit('inventory') && !player.dead && !ui.dialogOpen) ui.toggleModal('inventory');
 
   let moveAmount = 0;
-  const canAct = !player.dead && !ui.dialogOpen;
+  const canAct = !player.dead && !ui.isBlocking();
 
   if (canAct) {
     const fwd = new THREE.Vector3(-Math.sin(cam.yaw), 0, -Math.cos(cam.yaw));
@@ -239,46 +410,32 @@ function update(dt) {
     if (input.down('KeyA') || input.down('ArrowLeft')) mv.sub(right);
     if (mv.lengthSq() > 0) {
       mv.normalize();
-      const run = input.down('ShiftLeft') || input.down('ShiftRight');
-      const speed = run ? 13 : 8;
-      player.pos.addScaledVector(mv, speed * dt);
+      const run = input.held('run');
+      player.pos.addScaledVector(mv, (run ? 13 : 8) * dt);
       moveAmount = run ? 1 : 0.75;
-      const target = Math.atan2(mv.x, mv.z);
-      let diff = target - player.rotY;
+      let diff = Math.atan2(mv.x, mv.z) - player.rotY;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       player.rotY += diff * Math.min(1, dt * 14);
     }
-    if (input.hit('Space') && player.onGround) { player.vy = 10; player.onGround = false; }
+    if (input.hit('jump') && player.onGround) { player.vy = 10; player.onGround = false; }
 
-    if ((input.clicked || input.hit('KeyF')) && player.attackCd <= 0) {
-      player.attackCd = 0.5; player.attackAnim = 1;
-      setTimeout(() => {
-        if (player.dead) return;
-        for (const h of enemies.hitArc(player.pos, facing(), 3.2, rollDamage)) {
-          ui.float(headPos(h.enemy.pos, h.enemy.def.height + 0.4), h.crit ? `${h.dmg}!` : `${h.dmg}`, h.crit ? '#ffd84a' : '#ffffff', h.crit ? 28 : 20);
-          if (h.killed) onKill(h.enemy);
-        }
-      }, 140);
+    // clicar num inimigo trava o alvo
+    if (input.click) {
+      const picked = pickEnemyAt(input.click.x, input.click.y);
+      if (picked) lockTarget = picked;
     }
-
-    if (input.hit('Digit1')) {
-      if (player.potions <= 0) ui.log('Sem poções! Compre com a Mercadora Lia.', 'bad');
-      else if (player.hp >= player.maxHp) ui.log('Vida já está cheia.', 'info');
-      else {
-        player.potions--;
-        const heal = Math.round(player.maxHp * 0.5);
-        player.hp = Math.min(player.maxHp, player.hp + heal);
-        ui.float(headPos(player.pos), `+${heal}`, '#7dff7d', 22);
-      }
-    }
+    if (input.hit('target')) cycleTarget();
+    if (input.hit('attack') && player.attackCd <= 0) attack();
+    if (input.hit('potion')) useItem('potion');
+    if (input.hit('bigPotion')) useItem('big_potion');
   }
 
   // NPC próximo
   let near = null;
   for (const n of npcs) if (n.pos.distanceTo(player.pos) < 4) near = n;
-  ui.prompt(near && canAct ? `[E] Falar com ${near.name}` : null);
-  if (near && canAct && input.hit('KeyE')) talk(near);
-  if (ui.dialogOpen && input.hit('Escape')) ui.closeDialog();
+  const talkKey = keyLabel(input.bindings.talk.find(Boolean));
+  ui.prompt(near && canAct ? `[${talkKey}] ${near.id === 'merchant' ? 'Abrir loja de' : 'Falar com'} ${near.name}` : null);
+  if (near && canAct && input.hit('talk')) talk(near);
 
   // física
   player.vy -= 28 * dt;
@@ -287,9 +444,8 @@ function update(dt) {
   world.resolve(player.pos, 0.6);
 
   player.attackCd -= dt;
-  player.attackAnim = Math.max(0, player.attackAnim - dt * 3.5);
+  player.attackAnim = Math.max(0, player.attackAnim - dt * (weapon().style === 'ranged' ? 2.2 : 3.5));
 
-  // regeneração fora de combate
   if (!player.dead && t - player.lastHurt > 6 && player.hp < player.maxHp) {
     player.hp = Math.min(player.maxHp, player.hp + player.maxHp * 0.03 * dt);
   }
@@ -298,9 +454,15 @@ function update(dt) {
   hero.root.position.copy(player.pos);
   hero.root.rotation.y = player.rotY;
   if (player.dead) hero.root.rotation.z = Math.min(Math.PI / 2, hero.root.rotation.z + dt * 4);
-  animateCharacter(hero, t, moveAmount, player.attackAnim, !player.onGround);
+  const ranged = weapon().style === 'ranged';
+  animateCharacter(hero, t, moveAmount, ranged ? 0 : player.attackAnim, !player.onGround);
+  if (ranged) {
+    if (player.attackAnim > 0) { // pose de tiro: braço do arco esticado, outro puxando a corda
+      hero.armL.rotation.x = -1.55;
+      hero.armR.rotation.x = -1.35 + (1 - player.attackAnim) * 0.3;
+    } else if (!moveAmount) hero.armL.rotation.x = -0.35;
+  }
 
-  // NPCs olham para o jogador
   for (const n of npcs) {
     if (n.pos.distanceTo(player.pos) < 8) n.char.root.rotation.y = Math.atan2(player.pos.x - n.pos.x, player.pos.z - n.pos.z);
     animateCharacter(n.char, t, 0, 0);
@@ -308,31 +470,43 @@ function update(dt) {
   }
 
   enemies.update(dt, player, camera, { onPlayerHit });
+  projectiles.update(dt);
+  loot.update(dt, player, onPickup);
   world.update(t, dt);
+
+  // alvo: anel vermelho = travado, amarelo = mira automática do arco
+  if (lockTarget && (!alive(lockTarget) || distXZ(lockTarget.pos, player.pos) > 40)) lockTarget = null;
+  autoTarget = ranged && !player.dead ? findAutoTarget(weapon().range) : null;
+  const shown = currentTarget();
+  ring.visible = !!shown;
+  if (shown) {
+    const locked = shown === lockTarget;
+    ring.material.color.setHex(locked ? 0xff3b3b : 0xffd84a);
+    ring.position.set(shown.pos.x, 0.06, shown.pos.z);
+    ring.scale.setScalar(shown.def.radius * 1.1 + 0.3 + (locked ? Math.sin(t * 6) * 0.05 : 0));
+  }
 
   // marcador de missão
   const q = player.quest;
   setMarker(q.status === 'available' ? '!' : q.status === 'complete' ? '?' : '');
   marker.position.y = 4.4 + Math.sin(t * 3) * 0.15;
 
-  // zona
   const z = world.zoneAt(player.pos.x, player.pos.z);
   if (z && z !== currentZone) ui.log(`📍 ${z.name}`, 'info');
   currentZone = z;
 
-  // boss bar
   const boss = enemies.list.find((e) => e.def.boss && e.state === 'chase');
   ui.boss(boss ? boss.def.name : null, boss ? boss.hp / boss.def.hp : 0);
 
   // câmera segue
-  const target = new THREE.Vector3(player.pos.x, player.pos.y + 2.2, player.pos.z);
+  const camTarget = new THREE.Vector3(player.pos.x, player.pos.y + 2.2, player.pos.z);
   camera.position.set(
-    target.x + cam.dist * Math.cos(cam.pitch) * Math.sin(cam.yaw),
-    target.y + cam.dist * Math.sin(cam.pitch),
-    target.z + cam.dist * Math.cos(cam.pitch) * Math.cos(cam.yaw),
+    camTarget.x + cam.dist * Math.cos(cam.pitch) * Math.sin(cam.yaw),
+    camTarget.y + cam.dist * Math.sin(cam.pitch),
+    camTarget.z + cam.dist * Math.cos(cam.pitch) * Math.cos(cam.yaw),
   );
   camera.position.y = Math.max(0.5, camera.position.y);
-  camera.lookAt(target);
+  camera.lookAt(camTarget);
   sun.position.set(player.pos.x + 30, 60, player.pos.z + 20);
   sun.target.position.copy(player.pos);
 
@@ -346,9 +520,9 @@ function update(dt) {
     qh = `<h3>${def.title}</h3><p>${def.progressText(q.progress, def.count)}</p><p>★ ${def.where.label} — ${d}m</p>`;
   } else qh = `<h3>${def.title} ✔</h3><p>Volte ao ${elder.name} para a recompensa.</p>`;
   ui.quest(qh);
-  ui.hud(player, xpToNext(player.level), WEAPONS[player.weaponLvl].name);
+  ui.hud(player, xpToNext(player.level), weapon());
   const questTarget = q.status === 'active' ? def.where : (q.status === 'available' || q.status === 'complete') ? elder.pos : null;
-  ui.minimap(player, enemies.alive(), npcs, questTarget);
+  ui.minimap(player, enemies.alive(), npcs, questTarget, loot.list);
   ui.updateFloats(camera, dt);
 
   saveTimer += dt;
@@ -363,8 +537,8 @@ function frame() {
   requestAnimationFrame(frame);
 }
 
-ui.log('Bem-vindo a BlockQuest! Fale com o Ancião Bento (E).', 'info');
+ui.log('Bem-vindo a BlockQuest! Fale com o Ancião Bento.', 'info');
 frame();
 
 // atalho de debug no console
-window.game = { player, enemies, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };
+window.game = { player, enemies, loot, ui, equip, addItem, projectiles, world, reset: () => { localStorage.removeItem(SAVE_KEY); location.reload(); } };

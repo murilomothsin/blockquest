@@ -75,11 +75,13 @@ export class EnemyManager {
     const bar = makeHpBar(def.boss ? 3 : 1.4);
     bar.visible = false;
     this.scene.add(bar);
-    this.list.push({
+    const entry = {
       type, def, model, bar, spawn: at.clone(), pos: model.root.position,
       hp: def.hp, state: 'idle', wander: at.clone(), wanderT: Math.random() * 3,
-      atkCd: 0, attackAnim: 0, pendingHit: 0, deadT: 0, flashT: 0, t: Math.random() * 10, moving: 0,
-    });
+      atkCd: 0, attackAnim: 0, pendingHit: 0, deadT: 0, flashT: 0, t: Math.random() * 10, moving: 0, provokedT: 0,
+    };
+    model.root.userData.enemy = entry;
+    this.list.push(entry);
   }
 
   alive() { return this.list.filter((e) => e.state !== 'dead'); }
@@ -95,19 +97,25 @@ export class EnemyManager {
       const dot = (dx * facing.x + dz * facing.z) / (dist || 1);
       if (dot < 0.25 && dist > e.def.radius + 0.6) continue;
       const { dmg, crit } = rollDamage();
-      e.hp -= dmg;
-      e.flashT = 0.15;
-      flash(e.model, 0x880000);
-      if (e.state !== 'return') e.state = 'chase';
-      if (!e.def.boss) {
-        e.pos.x += (dx / (dist || 1)) * 0.8;
-        e.pos.z += (dz / (dist || 1)) * 0.8;
-      }
-      const killed = e.hp <= 0;
-      if (killed) this.kill(e);
-      hits.push({ enemy: e, dmg, crit, killed });
+      hits.push(this.damage(e, dmg, crit, new THREE.Vector3(dx, 0, dz).normalize(), 0.8));
     }
     return hits;
+  }
+
+  /** Aplica dano (corpo a corpo ou flecha). Retorna {enemy, dmg, crit, killed}. */
+  damage(e, dmg, crit, dir, knock = 0.8) {
+    e.hp -= dmg;
+    e.flashT = 0.15;
+    flash(e.model, 0x880000);
+    e.state = 'chase';
+    e.provokedT = 8; // persegue mesmo se o jogador estiver longe (ex.: atacou com arco)
+    if (!e.def.boss && dir) {
+      e.pos.x += dir.x * knock;
+      e.pos.z += dir.z * knock;
+    }
+    const killed = e.hp <= 0;
+    if (killed) this.kill(e);
+    return { enemy: e, dmg, crit, killed };
   }
 
   kill(e) {
@@ -144,9 +152,10 @@ export class EnemyManager {
       let move = null, speed = def.speed;
 
       if (e.state === 'idle' && dist < def.aggro) e.state = 'chase';
+      e.provokedT = Math.max(0, (e.provokedT || 0) - dt);
 
       if (e.state === 'chase') {
-        if (fromSpawn > (def.boss ? 22 : 30) || dist > def.aggro * 2.2) e.state = 'return';
+        if (fromSpawn > (def.boss ? 22 : 34) || (dist > def.aggro * 2.2 && e.provokedT <= 0)) e.state = 'return';
         else if (dist > def.range * 0.8) move = new THREE.Vector2(dx, dz);
         if (dist < def.range && e.atkCd <= 0) {
           e.atkCd = def.cd; e.attackAnim = 1; e.pendingHit = def.boss ? 0.5 : 0.3;

@@ -14,7 +14,8 @@
       <div class="row"><b id="pname">Aventureiro</b> <span class="lvl">Nv <span id="level">1</span></span></div>
       <div class="bar hp"><div id="hpfill"></div><span id="hptext"></span></div>
       <div class="bar xp"><div id="xpfill"></div><span id="xptext"></span></div>
-      <div class="row small">🪙 <span id="gold">0</span> &nbsp; 🧪 <span id="potions">0</span> &nbsp; ⚔️ <span id="weapon"></span></div>
+      <div class="row small">🪙 <span id="gold">0</span> &nbsp; 🧪 <span id="potions">0</span> &nbsp; ⚗️ <span id="bigpotions">0</span> &nbsp; <span title="Um item cai a cada 5 abates">🎁 <span id="drop">0/5</span></span></div>
+      <div class="row small" id="weapon"></div>
     </div>
     <div class="panel" id="quest"></div>
     <canvas id="minimap" width="170" height="170"></canvas>
@@ -24,6 +25,7 @@
   <div id="prompt" class="hidden"></div>
   <div id="log"></div>
   <div id="floats"></div>
+  <div id="controls" class="panel"></div>
 
   <div id="dialog" class="hidden">
     <div id="dtitle"></div>
@@ -31,13 +33,19 @@
     <div id="dbuttons"></div>
   </div>
 
+  <div id="modal-bg" class="hidden">
+    <div id="modal">
+      <div id="mhead"><div id="mtitle"></div><button id="mclose" class="secondary">✕</button></div>
+      <div id="mtabs"></div>
+      <div id="mbody"></div>
+    </div>
+  </div>
+
   <div id="death" class="hidden">
     <h1>Você caiu!</h1>
     <p>Perdeu 10% do seu ouro.</p>
     <button id="respawn">Renascer na vila</button>
   </div>
-
-  <div id="help">WASD mover · Shift correr · Espaço pular · Clique/F atacar · Botão direito + arrastar câmera · Scroll zoom · E falar · 1 poção</div>
 
   <script type="module" src="/src/main.js"></script>
 </body>
