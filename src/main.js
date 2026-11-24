@@ -128,7 +128,7 @@ const isEquipped = (id) => isEquippedBy(player, id);
 const facing = () => new THREE.Vector3(Math.sin(player.rotY), 0, Math.cos(player.rotY));
 const headPos = (p, hgt = 2.8) => new THREE.Vector3(p.x, hgt, p.z);
 const distXZ = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
-const CHAR_KEYS = ['level', 'xp', 'gold', 'maxHp', 'hp', 'kills', 'inv', 'equipped', 'armor', 'helmet', 'quest', 'cls', 'skills', 'chests', 'home', 'deaths', 'buffs'];
+const CHAR_KEYS = ['level', 'xp', 'gold', 'maxHp', 'hp', 'kills', 'inv', 'equipped', 'armor', 'helmet', 'quest', 'cls', 'skills', 'chests', 'home', 'deaths', 'buffs', 'farm'];
 /** personagem vindo do servidor substitui o local */
 function applyChar(c) {
   if (!c) return;
@@ -241,11 +241,19 @@ const NPC_LOOKS = {
   merchant: { shirt: 0xe0a72e, pants: 0x5a3d1f, hair: 0x8a3b12 },
   captain: { shirt: 0x3b5fb5, pants: 0x2b3a67, hair: 0x8a3b12, gear: { armorColor: 0xcfd6de, helmetColor: 0xcfd6de } },
   smith: { shirt: 0x6b4423, pants: 0x3b2a1a, hair: 0x2b2b2b },
+  mage: { shirt: 0x3a2a7a, pants: 0x2a1f5c, hair: 0xd9d9e8, hat: 0x3a2a7a },
 };
 const npcs = Object.entries(NPCS).map(([id, n]) => ({ id, ...n, pos: new THREE.Vector3(n.x, 0, n.z), look: NPC_LOOKS[id] }));
 for (const n of npcs) {
   n.char = createCharacter(n.look);
   if (n.look.gear) setGear(n.char, n.look.gear);
+  if (n.look.hat) { // chapéu de mago + cajado
+    const hat = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.95, 8), new THREE.MeshLambertMaterial({ color: n.look.hat }));
+    hat.position.y = 0.72; n.char.head.add(hat);
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.06, 12), hat.material);
+    brim.position.y = 0.27; n.char.head.add(brim);
+    setWeapon(n.char, { ...ITEMS.crystal_staff });
+  }
   n.char.root.position.copy(n.pos);
   n.char.root.rotation.y = Math.atan2(-n.pos.x, -n.pos.z);
   scene.add(n.char.root);
@@ -278,7 +286,7 @@ const respecButton = () => (player.cls && Object.keys(player.skills).length
   ? [{ label: '↺ Redistribuir pontos', onClick: () => request({ a: 'respec' }) }] : []);
 
 function talk(npc) {
-  if (npc.role === 'shop') { ui.shopTab = 'buy'; ui.shopName = npc.name; return ui.openModal('shop'); }
+  if (npc.role === 'shop') { ui.shopTab = 'buy'; ui.shopNpc = npc; return ui.openModal('shop'); }
   const q = player.quest, def = QUESTS[q.idx];
   const extra = npc.id === 'elder' ? respecButton() : [];
   if (q.status === 'done') return ui.dialog(npc.name, 'Graças a você o reino está em paz. Novas aventuras virão em breve...', extra);
@@ -365,7 +373,7 @@ function reportHit({ enemy, dmg, crit, mine }) {
 }
 enemies.handlers = {
   onDamage: reportHit,
-  onKill: (e) => onKill(e),
+  onKill: (e, key) => onKill(e, key),
   onPlayerHit: (dmg, e) => onPlayerHit(dmg, e),
   onWild: (e) => ui.log(`⚠️ Um ${e.def.name.toLowerCase()} saltou do meio das árvores!`, 'bad'),
 };
@@ -423,10 +431,10 @@ function onSkillResult(r) {
 }
 
 /** Abate (só offline; online o servidor manda o resultado como fx) */
-function onKill(e) {
+function onKill(e, key) {
   if (lockTarget === e) lockTarget = null;
   const fx = [];
-  kill(player, e.type, { x: e.pos.x, z: e.pos.z }, ctxLocal(), fx);
+  kill(player, e.type, { x: e.pos.x, z: e.pos.z }, ctxLocal(), fx, key);
   applyFx(fx);
   save();
 }
@@ -443,7 +451,7 @@ const drinkFromWell = () => request({ a: 'well' });
 
 /** Pergaminho de Retorno (tecla 3): volta para a vila */
 function useScroll() {
-  if (!player.inv.scroll_return) return ui.log('Sem Pergaminho de Retorno! Compre numa loja (45 🪙).', 'bad');
+  if (!player.inv.scroll_return) return ui.log('Sem Pergaminho de Retorno! Compre com o Mago Eldrin no castelo (45 🪙).', 'bad');
   useItem('scroll_return');
 }
 

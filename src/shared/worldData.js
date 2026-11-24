@@ -107,9 +107,10 @@ export const WELL = WELLS[0];
 /** NPCs (posição usada também pelo servidor). role: 'quests' dá missões, 'shop' abre a loja */
 export const NPCS = {
   elder: { name: 'Ancião Bento', x: 4, z: -5, role: 'quests', title: 'o Ancião Bento', where: 'na vila' },
-  merchant: { name: 'Mercadora Lia', x: -6, z: 4, role: 'shop' },
+  merchant: { name: 'Mercadora Lia', x: -6, z: 4, role: 'shop', sells: 'basic', where: 'na vila' },
   captain: { name: 'Capitã Helena', x: CASTLE.x - 7, z: CASTLE.z + 2, role: 'quests', title: 'a Capitã Helena', where: 'no Castelo de Pedralta' },
-  smith: { name: 'Ferreiro Duarte', x: CASTLE.x + 8, z: CASTLE.z + 4, role: 'shop' },
+  smith: { name: 'Ferreiro Duarte', x: CASTLE.x + 8, z: CASTLE.z + 4, role: 'shop', sells: 'smith', where: 'no castelo' },
+  mage: { name: 'Mago Eldrin', x: CASTLE.x - 14, z: CASTLE.z + 12, role: 'shop', sells: 'arcane', where: 'no castelo' },
 };
 export const INTERACT_RANGE = { npc: 6, well: 4.5, door: 3.2, furniture: 3, chest: 3 };
 export const SPAWN_POINT = [0, 0, 8];
@@ -142,11 +143,11 @@ const MINE_ROOMS = [
 const MINE_LINKS = [[0, 1], [0, 2], [1, 4], [2, 3], [3, 5], [4, 5], [3, 6]];
 const MINE_MARKS = [
   ['E', 4, 3],
-  ['spider', 12, 2], ['spider', 15, 2], ['spider', 13, 4], ['spider', 16, 4], ['C', 16, 1],
+  ['spider', 12, 2], ['spider', 15, 2], ['spider', 13, 4], ['spider', 16, 4],
   ['skeleton', 3, 11], ['skeleton', 6, 11], ['skeleton', 4, 13], ['C', 7, 14],
-  ['cave_goblin', 13, 10], ['cave_goblin', 17, 10], ['cave_goblin', 15, 12], ['cave_goblin', 13, 13], ['C', 18, 13],
+  ['cave_goblin', 13, 10], ['cave_goblin', 17, 10], ['cave_goblin', 15, 12], ['cave_goblin', 13, 13],
   ['zombie', 22, 4], ['zombie', 25, 4], ['zombie', 23, 7], ['zombie', 25, 7], ['C', 26, 3],
-  ['skeleton', 22, 14], ['spider', 25, 14], ['spider', 23, 16], ['zombie', 25, 16], ['C', 26, 17],
+  ['skeleton', 22, 14], ['spider', 25, 14], ['spider', 23, 16], ['zombie', 25, 16],
   ['goblin_boss', 14, 22], ['cave_goblin', 10, 20], ['cave_goblin', 18, 20], ['T', 14, 24],
 ];
 function buildMineGrid() {
@@ -189,7 +190,7 @@ function buildTowerGrid(floor) {
   return g;
 }
 const TOWER_MARKS = {
-  1: [['D', 10, 18], ['U', 10, 2], ['skeleton', 4, 7], ['skeleton', 16, 7], ['skeleton', 4, 13], ['cultist', 14, 13], ['cultist', 7, 4], ['cultist', 13, 4], ['C', 15, 15]],
+  1: [['D', 10, 18], ['U', 10, 2], ['skeleton', 4, 7], ['skeleton', 16, 7], ['skeleton', 4, 13], ['cultist', 14, 13], ['cultist', 7, 4], ['cultist', 13, 4]],
   2: [['D', 10, 18], ['U', 10, 2], ['ghost', 5, 5], ['ghost', 15, 5], ['ghost', 5, 15], ['ghost', 15, 15], ['cultist', 8, 10], ['cultist', 12, 10], ['C', 10, 10]],
   3: [['D', 10, 18], ['U', 10, 10], ['gargoyle', 10, 3], ['gargoyle', 17, 10], ['gargoyle', 3, 10], ['cultist', 10, 14], ['cultist', 6, 10], ['C', 10, 6]],
   4: [['D', 10, 18], ['necromancer', 10, 9], ['cultist', 7, 11], ['cultist', 13, 11], ['T', 10, 4]],

@@ -388,7 +388,7 @@ export class EnemyManager {
         break;
       case 'killed':
         if (!this.online && ev.credit?.includes(this.myId)) { // online: a recompensa vem do servidor (fx)
-          this.handlers.onKill(v || { id: ev.id, type: ev.type, def: TYPES[ev.type], pos: at, state: 'dead' });
+          this.handlers.onKill(v || { id: ev.id, type: ev.type, def: TYPES[ev.type], pos: at, state: 'dead' }, ev.key);
         }
         break;
       case 'wild':

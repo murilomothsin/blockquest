@@ -5,7 +5,7 @@ import { mulberry32 } from './shared/rng.js';
 import {
   WORLD_RADIUS, SAFE_ZONE, SAFE_ZONES, WOODS, ZONES, PATHS, HOUSES, LAKE, BIOMES, biomeBlend, buildLayout, createWorldQueries,
   MINE_DOOR, HOME, HOME_FURNITURE, HOME_EXIT, HOME_DOOR, TREASURES, DUNGEONS, tileCenter, dungeonAt,
-  CASTLE, CURSED, TOWER, TOWER_DOOR, WELLS, BOSS_ROOMS,
+  CASTLE, CURSED, TOWER, TOWER_DOOR, WELLS, BOSS_ROOMS, NPCS,
 } from './shared/worldData.js';
 
 export { WORLD_RADIUS, SAFE_ZONE, WOODS, ZONES };
@@ -618,6 +618,17 @@ function buildCastle(scene, layout, animated) {
   }
   keep.position.set(K.x, 0, K.z);
   scene.add(keep);
+  // tenda do mago: toldo roxo, mesa com bola de cristal e pergaminhos
+  const M = NPCS.mage, tent = new THREE.Group();
+  tent.add(mesh(new THREE.BoxGeometry(4.4, 0.25, 3), 0x4a2a8a, 0, 3.4, 0));
+  for (const [x, z] of [[-2, -1.3], [2, -1.3], [-2, 1.3], [2, 1.3]]) tent.add(mesh(new THREE.BoxGeometry(0.18, 3.4, 0.18), 0x5a3a1a, x, 1.7, z));
+  tent.add(mesh(new THREE.BoxGeometry(2.6, 0.9, 1), 0x6b4423, 0, 0.45, 1.6));
+  const ball = glow(new THREE.SphereGeometry(0.28, 12, 10), 0x9fd8ff, -0.6, 1.2, 1.6);
+  tent.add(ball);
+  for (let i = 0; i < 3; i++) tent.add(mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.5, 6), 0xe8d9a8, 0.3 + i * 0.3, 1.0, 1.6).rotateZ(Math.PI / 2));
+  animated.push((t) => { ball.position.y = 1.2 + Math.sin(t * 2) * 0.05; });
+  tent.position.set(M.x, 0, M.z - 2.6);
+  scene.add(tent);
   // fonte que cura
   const F = WELLS[1];
   const fount = new THREE.Group();

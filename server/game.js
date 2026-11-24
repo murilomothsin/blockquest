@@ -46,7 +46,7 @@ export function createGame({ players, send }) {
         const p = players.get(pid);
         if (!p) continue;
         const fx = [];
-        kill(p.c, ev.type, { x: ev.x, z: ev.z }, ctxOf(p), fx);
+        kill(p.c, ev.type, { x: ev.x, z: ev.z }, ctxOf(p), fx, ev.key);
         pushFx(p, fx);
       }
     }

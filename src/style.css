@@ -299,3 +299,5 @@ body.touch #mclose { width: 48px; height: 44px; font-size: 22px; }
   .ttop { left: auto; right: calc(6px + env(safe-area-inset-right)); transform: none; top: 140px; flex-direction: column; }
   #region { top: 112px; }
 }
+
+.shopnote { margin: 0 0 10px; font-size: 13px; color: #d9cfa8; opacity: .9; }

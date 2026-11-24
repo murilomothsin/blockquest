@@ -201,8 +201,8 @@ for (const t of Object.keys(TYPES)) {
 }
 const mineGold = MINE_SPAWNS.reduce((s, m) => s + avg(TYPES[m.type].gold), 0);
 const mineXp = MINE_SPAWNS.reduce((s, m) => s + TYPES[m.type].xp, 0);
-const chestGold = [1, 2, 2, 2, 2, 3].reduce((s, tr) => s + avg(TREASURE_LOOT[tr].gold), 0);
-log(`Mina inteira: ${MINE_SPAWNS.length} monstros = ${mineGold} ouro + ${mineXp} xp; + 6 baús ≈ ${chestGold} ouro e ~${[1, 2, 2, 2, 2, 3].reduce((s, tr) => s + avg(TREASURE_LOOT[tr].items) + (TREASURE_LOOT[tr].guaranteedRare ? 1 : 0), 0)} itens`);
+const chestGold = [2, 2, 3].reduce((s, tr) => s + avg(TREASURE_LOOT[tr].gold), 0);
+log(`Mina inteira: ${MINE_SPAWNS.length} monstros = ${mineGold} ouro + ${mineXp} xp; + 3 baús ≈ ${chestGold} ouro e ~${[2, 2, 3].reduce((s, tr) => s + avg(TREASURE_LOOT[tr].items) + (TREASURE_LOOT[tr].guaranteedRare ? 1 : 0), 0)} itens`);
 log(`Missões: ${QUESTS.map((q) => `${q.id} ${q.reward.gold}g/${q.reward.xp}xp`).join(' · ')}`);
 const kit = (l) => { const g = GEAR.find((x) => l <= x.upTo); const w = WEAPON.guerreiro[g.tier]; return [w, g.armor, g.helmet].filter(Boolean).reduce((s, id) => s + (ITEMS[id].price || 0), 0); };
 log(`Custo do kit da faixa (arma+armadura+elmo): Nv3-4 ${kit(3)} · Nv5-7 ${kit(5)} · Nv8-10 ${kit(8)} · Nv11+ ${kit(11)}`);

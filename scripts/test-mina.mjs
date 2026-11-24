@@ -45,7 +45,7 @@ function client(token, name) {
   c.act = (a) => c.ws.send(JSON.stringify({ t: 'act', ...a }));
   c.hit = (ids, kind) => c.ws.send(JSON.stringify({ t: 'hit', kind, ids }));
   c.walk = async (x, z) => {
-    for (;;) {
+    for (let i = 0; i < 300; i++) { // limite: parede/morte respondem setpos e o loop nunca chegaria
       const dx = x - c.x, dz = z - c.z, d = Math.hypot(dx, dz);
       if (d < 0.05) break;
       const step = Math.min(d, 1.2);
@@ -140,8 +140,26 @@ ok(!A.char.chests[t.id], 'baú longe não abre');
 // teleporte de teste direto no servidor (anda pela mina seria longo): usa o caminho do jogo
 const { createWorldQueries } = await import('../src/shared/worldData.js');
 await A.walk(MINE_ENTRY.x, MINE_ENTRY.z);
-// caminho pela grade até o baú 1 (sala das aranhas): entrada → leste
-for (const [x, z] of [[MINE_ENTRY.x, -42], [446, -42], [446, -50], [t.x - 2, t.z + 2]]) await A.walk(x, z);
+// caminho pela grade (BFS) da entrada até o baú 1
+{
+  const { DUNGEON_BY_ID, tileCenter } = await import('../src/shared/worldData.js');
+  const d = DUNGEON_BY_ID.mine, tileOf = (x, z) => [Math.floor((x - d.x0) / d.tile), Math.floor((z - d.z0) / d.tile)];
+  const [sx, sz] = tileOf(A.x, A.z), [gx, gz] = tileOf(t.x, t.z);
+  const prev = new Map([[`${sx},${sz}`, null]]), queue = [[sx, sz]];
+  while (queue.length) {
+    const [x, z] = queue.shift();
+    if (x === gx && z === gz) break;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const k = `${x + dx},${z + dz}`;
+      if (prev.has(k) || d.grid[z + dz]?.[x + dx] !== 0) continue;
+      prev.set(k, `${x},${z}`); queue.push([x + dx, z + dz]);
+    }
+  }
+  const path = [];
+  for (let k = `${gx},${gz}`; k; k = prev.get(k)) path.unshift(k.split(',').map(Number));
+  for (const [x, z] of path.slice(1, -1)) { const c = tileCenter(d, x, z); await A.walk(c.x, c.z); }
+  await A.walk(t.x, t.z + 1.5);
+}
 A.ev.length = 0;
 A.act({ a: 'open_chest', id: t.id }); await A.idle(300);
 const drops = A.fx.filter((f) => f.k === 'loot');

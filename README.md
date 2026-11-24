@@ -151,10 +151,13 @@ Os controles somem enquanto uma janela está aberta. No celular o jogo usa menos
 - **Zonas seguras:** círculo de 32 m em volta da vila e o pátio do castelo (marcados no chão). Monstros não entram e nada aparece ali.
 - **Encontros selvagens (estilo Pokémon):** andando no meio das árvores, fora da vila e das estradas, de vez em quando um goblin pula do mato (com "!"). No máximo 2 por jogador, com intervalo mínimo de 15 s. Online, outros jogadores por perto também veem e podem ajudar. Configurável em `WILD` (`src/shared/mobs.js`).
 - **Golem Antigo:** se você fica a mais de 8 m, ele arremessa pedras. Uma área vermelha marca onde a pedra vai cair, e dá pra desviar.
-- **Drops:** a cada 5 inimigos derrotados cai um baú (poção, arma ou armadura). O chefe sempre deixa um equipamento raro.
+- **Drops:** a cada 5 inimigos derrotados cai um baú (poção, arma ou armadura). O chefe deixa um equipamento raro.
+- **Anti-farm:** se você mata de novo o mesmo monstro (mesmo ponto de nascimento) em menos de 30 min, ele conta como "de respawn": o drop dos 5 abates só cai em 35% das vezes e é sempre básico (poções, couro, espada de madeira/ferro, adaga de ferro); chefe repetido não deixa equipamento raro (30% de chance de um item básico). Por jogador: quem chega depois ainda ganha o drop normal.
+- **Respawn:** na superfície é normal. Na mina e na torre é **6× mais lento** (esqueleto: 3 min; Goblin Minerador: 12 min; Necromante: 18 min) e **gradual**: um monstro por vez a cada 12 s, e nunca na frente de um jogador (precisa estar a 16 m ou fora da visão). Nas Ruínas Amaldiçoadas é 3× mais lento, também gradual. Chefes da superfície: 4×. Valores em `RESPAWN` (`src/shared/mobs.js`).
+- **Lojas:** Mercadora Lia (vila) vende só o básico do começo (poções, espada de madeira/ferro, adaga de ferro, arco curto, couro). O **Ferreiro Duarte** (castelo) vende armas e armaduras de todos os níveis. Pergaminhos e cajados (itens mágicos) só com o **Mago Eldrin** (castelo). Qualquer loja compra o que você quiser vender.
 - **Armaduras e capacetes:** 5 tiers com as mesmas cores das armas (couro, ferro, aço, rúnico e élfico, este só caindo de monstros). A defesa da armadura e do capacete soma, e cada ponto reduz o dano em %, com retorno decrescente: `def / (def + 25)`. Ferro completo (10) bloqueia 29%; rúnico completo (27), 52%. A primeira missão dá uma Armadura de Couro.
 - **Limite do mapa:** círculo de 300 m, cercado por montanhas.
-- **Pergaminhos (uso único):** Retorno (45 🪙, tecla 3: volta para o centro da vila de qualquer lugar, inclusive dungeons), Proteção (+15 defesa por 60 s), Pressa (+30% velocidade por 45 s) e Fúria (+25% dano por 30 s). Vendidos nas lojas, caem de baús e dos drops; o Baú de casa guarda pergaminhos. Os efeitos ativos aparecem ao lado do painel com o tempo restante.
+- **Pergaminhos (uso único):** Retorno (45 🪙, tecla 3: volta para o centro da vila de qualquer lugar, inclusive dungeons), Proteção (+15 defesa por 60 s), Pressa (+30% velocidade por 45 s) e Fúria (+25% dano por 30 s). Vendidos só pelo Mago Eldrin (castelo); também caem de baús e dos drops, e as missões do Golem e da mina dão Pergaminhos de Retorno; o Baú de casa guarda pergaminhos. Os efeitos ativos aparecem ao lado do painel com o tempo restante.
 
 ### Biomas
 | Bioma | Onde | Monstros | Baú |
@@ -167,7 +170,7 @@ Os controles somem enquanto uma janela está aberta. No celular o jogo usa menos
 | Terras Amaldiçoadas | sul/sudeste | fantasmas, esqueletos · **Ruínas Amaldiçoadas** e **Torre do Necromante** | 2 |
 
 ### Castelo de Pedralta
-Ao norte (siga a estrada). Muralhas, torres, portão e um pátio que é **zona segura**, com a **Capitã Helena** (missões 5–8), o **Ferreiro Duarte** (loja igual à da Mercadora Lia) e uma **fonte** que cura como o poço.
+Ao norte (siga a estrada). Muralhas, torres, portão e um pátio que é **zona segura**, com a **Capitã Helena** (missões 5–8), o **Ferreiro Duarte** (armas e armaduras avançadas), o **Mago Eldrin** na tenda roxa (pergaminhos e cajados) e uma **fonte** que cura como o poço.
 
 ### Ruínas Amaldiçoadas
 Cemitério com lápides, muros caídos, névoa roxa, fogos-fátuos e uma cripta. **Fantasmas** flutuam pelas ruínas e a **Rainha Espectral** (6.500 de vida) guarda a cripta: o grito dela cai numa área marcada no chão.
@@ -182,10 +185,10 @@ Técnicas de câmera de *dungeon crawler* (Diablo, Hades): **ângulo alto e fixo
 1–4 com o Ancião Bento (slimes, goblins, Golem, mina). Depois ele te manda para o castelo: **5 Lobos do Planalto**, **6 Os Mortos Não Descansam** (fantasmas), **7 A Rainha Espectral** e **8 A Torre do Necromante**, com a Capitã Helena. O "!" e o "?" aparecem em cima de quem dá a missão.
 
 ### Mina Abandonada (dungeon)
-Entre pela porta na Pedreira (E). Lá dentro é escuro (o personagem leva uma lanterna) e as paredes bloqueiam movimento, flechas e visão — também no servidor. São 7 salas: entrada, aranhas, ossos (esqueletos), goblins das cavernas, cripta (mortos-vivos), salão e a sala do chefe **Goblin Minerador** (3.200 de vida, joga dinamite com área marcada no chão). 22 monstros e 6 baús. Saída pela escada da entrada. Feita para o **nível 8** (ver Balanceamento).
+Entre pela porta na Pedreira (E). Lá dentro é escuro (o personagem leva uma lanterna) e as paredes bloqueiam movimento, flechas e visão — também no servidor. São 7 salas: entrada, aranhas, ossos (esqueletos), goblins das cavernas, cripta (mortos-vivos), salão e a sala do chefe **Goblin Minerador** (3.200 de vida, joga dinamite com área marcada no chão). 22 monstros e 3 baús. Saída pela escada da entrada. Feita para o **nível 8** (ver Balanceamento).
 
 ### Baús de tesouro
-20 baús fixos (superfície, mina e torre). Abrir (E) espalha **moedas douradas** e 1–4 itens no chão. Cada jogador tem os seus: depois de aberto, o baú volta em 10 min (comum), 20 min (raro) ou 45 min (lendário, sala do chefe, sempre com 1 equipamento de chefe).
+16 baús fixos: 10 na superfície, **3 na mina e 3 na torre** (no máximo 3 por dungeon). Abrir (E) espalha **moedas douradas** e 1–4 itens no chão. Cada jogador tem os seus: depois de aberto, o baú volta em 10 min (comum), 20 min (raro) ou 45 min (lendário, sala do chefe, sempre com 1 equipamento de chefe).
 
 ### Classes e árvore de habilidades
 No **nível 2** o jogador escolhe a classe (permanente; ganha a arma da classe de presente). Inspiradas nas classes que existem tanto em **Tormenta20** quanto em **D&D 5e** e que combinam com um RPG de ação com espada/arco/magia:

@@ -4,7 +4,10 @@
 import WebSocket from 'ws';
 import { db, q } from '../server/db.js';
 import { NPCS, TOWER_DOOR, DOOR_BY_ID, WELLS, SPAWN_POINT, dungeonAt, regionAt, DUNGEON_SPAWNS, CURSED } from '../src/shared/worldData.js';
-import { MobSim } from '../src/shared/mobs.js';
+import { MobSim, RESPAWN } from '../src/shared/mobs.js';
+import { createWorldQueries, buildLayout } from '../src/shared/worldData.js';
+import { newCharacter, kill, LootBag } from '../src/shared/progress.js';
+import { ITEMS } from '../src/shared/items.js';
 import { QUESTS } from '../src/shared/quests.js';
 
 const BASE = process.argv[2] || 'http://localhost:3001';
@@ -61,13 +64,53 @@ const base = (pos, extra = {}) => ({
 });
 
 console.log('\n— Mundo (regras puras) —');
-const sim = new MobSim(() => 0.5);
+const world = createWorldQueries(buildLayout());
+const sim = new MobSim(world);
 const count = (t) => sim.mobs.filter((m) => m.type === t).length;
 ok(count('ghost') >= 8 && sim.mobs.filter((m) => m.type === 'ghost' && Math.hypot(m.x - CURSED.x, m.z - CURSED.z) < CURSED.r + 2).length >= 8, `fantasmas nas ruínas: ${count('ghost')}`);
 ok(count('banshee') === 1 && count('necromancer') === 1, 'Rainha Espectral e Necromante existem (1 de cada)');
 ok(count('wolf') >= 10 && count('cultist') > 0 && count('gargoyle') > 0, `lobos ${count('wolf')}, cultistas ${count('cultist')}, gárgulas ${count('gargoyle')}`);
 ok(DUNGEON_SPAWNS.every((s) => dungeonAt(s.x, s.z)), `todos os ${DUNGEON_SPAWNS.length} monstros de dungeon nascem dentro de uma dungeon`);
 ok(QUESTS.length === 8 && QUESTS.slice(4).every((qd) => qd.giver === 'captain'), '8 missões, as 4 novas com a Capitã Helena');
+
+console.log('\n— Respawn nas dungeons (lento e gradual) —');
+{
+  const mine = sim.mobs.filter((m) => m.area === 'mine' && !m.def.boss).slice(0, 3);
+  for (const m of mine) sim.kill(m);
+  ok(mine.every((m) => m.deadT === m.def.respawn * RESPAWN.dungeonMul), `monstro da mina demora ${mine[0].deadT} s para voltar (era ${mine[0].def.respawn} s)`);
+  const boss = sim.mobs.find((m) => m.type === 'goblin_boss'); sim.kill(boss);
+  ok(boss.deadT >= 600, `Goblin Minerador volta em ${boss.deadT / 60} min`);
+  const slime = sim.mobs.find((m) => m.type === 'slime'); sim.kill(slime);
+  ok(slime.deadT === slime.def.respawn, 'slime da superfície continua com respawn normal');
+  const far = [{ id: 1, x: 0, z: 8, dead: false }];
+  const backAt = [];
+  for (let t = 0; t < 260; t += 0.5) { sim.update(0.5, far); for (const m of mine) if (m.state !== 'dead' && !backAt.includes(m.id)) backAt.push(m.id, Math.round(sim.time)); }
+  const times = backAt.filter((_, i) => i % 2).sort((a, b) => a - b);
+  ok(times.length === 3 && times[1] - times[0] >= RESPAWN.gap && times[2] - times[1] >= RESPAWN.gap, `voltam um de cada vez: ${times.join(' s, ')} s`);
+  const m2 = mine[0]; sim.kill(m2);
+  const watcher = [{ id: 1, x: m2.spawnX + 2, z: m2.spawnZ, dead: false }];
+  for (let t = 0; t < 260; t += 0.5) sim.update(0.5, watcher);
+  ok(m2.state === 'dead', 'não renasce na frente de um jogador que está olhando');
+}
+
+console.log('\n— Drops de monstro de respawn (anti-farm) —');
+{
+  const c = newCharacter(); const bag = new LootBag();
+  const ctx = (r) => ({ pos: { x: 0, z: 0 }, now: 0, clock: 1e9, rand: () => r, loot: bag });
+  const dropsOf = (fx) => fx.filter((f) => f.k === 'loot').map((f) => f.item);
+  c.kills = 4;
+  let fx = []; kill(c, 'goblin_boss', { x: 0, z: 0 }, ctx(0.99), fx, 'goblin_boss@457,30');
+  const first = dropsOf(fx);
+  ok(first.some((id) => !ITEMS[id].price), `1º abate do chefe: equipamento raro (${first.join(', ')})`);
+  c.kills = 9; fx = []; kill(c, 'goblin_boss', { x: 0, z: 0 }, ctx(0.1), fx, 'goblin_boss@457,30');
+  const again = dropsOf(fx);
+  ok(again.every((id) => ['potion', 'big_potion', 'leather_armor', 'leather_helmet', 'wood_sword', 'iron_dagger', 'iron_sword'].includes(id)), `chefe de novo em menos de 30 min: só item básico (${again.join(', ') || 'nada'})`);
+  c.kills = 14; fx = []; kill(c, 'skeleton', { x: 0, z: 0 }, ctx(0.9), fx, 'skeleton@1,1');
+  c.kills = 19; fx = []; kill(c, 'skeleton', { x: 0, z: 0 }, ctx(0.9), fx, 'skeleton@1,1');
+  ok(dropsOf(fx).length === 0, 'monstro farmado: o drop dos 5 abates pode não cair (35%)');
+  c.kills = 24; fx = []; kill(c, 'skeleton', { x: 0, z: 0 }, ctx(0.9), fx, 'skeleton@9,9');
+  ok(dropsOf(fx).length === 1, 'monstro novo (outro ponto) dropa normal');
+}
 
 // ---------- Torre ----------
 console.log('\n— Torre do Necromante —');
@@ -114,7 +157,12 @@ const cap = NPCS.captain, smith = NPCS.smith;
 const C = client(await account(NAMES[1], base({ x: smith.x, z: smith.z + 2 }, { hp: 40 })));
 await C.ready;
 C.act({ a: 'buy', id: 'scroll_shield' }); await C.idle(300);
-ok(C.char.inv.scroll_shield === 1 && C.char.gold === 440, `comprou Pergaminho de Proteção com o Ferreiro (ouro ${C.char.gold})`);
+ok(!C.char.inv.scroll_shield && /Mago Eldrin/.test(C.lastLog()), `Ferreiro não vende pergaminho: "${C.lastLog()}"`);
+C.act({ a: 'buy', id: 'steel_sword' }); await C.idle(300);
+ok(C.char.inv.steel_sword === 1 && C.char.gold === 240, `Ferreiro vende Espada de Aço (ouro ${C.char.gold})`);
+await C.walk(NPCS.mage.x + 2, NPCS.mage.z);
+C.act({ a: 'buy', id: 'scroll_shield' }); await C.idle(300);
+ok(C.char.inv.scroll_shield === 1 && C.char.gold === 180, `Mago vende Pergaminho de Proteção (ouro ${C.char.gold})`);
 await C.walk(WELLS[1].x + 2, WELLS[1].z);
 C.act({ a: 'well' }); await C.idle(300);
 ok(C.char.hp === C.char.maxHp, `fonte do castelo curou (${C.char.hp}/${C.char.maxHp})`);
@@ -131,6 +179,13 @@ V.act({ a: 'quest_accept' }); await V.idle(300);
 ok(V.char.quest.status === 'available', 'o Ancião não entrega missão da Capitã');
 V.act({ a: 'buy', id: 'scroll_return' }); await V.idle(200);
 ok(V.char.inv.scroll_return === 2, 'longe da loja não compra');
+await V.walk(NPCS.merchant.x + 2, NPCS.merchant.z);
+V.act({ a: 'buy', id: 'steel_armor' }); await V.idle(300);
+ok(!V.char.inv.steel_armor && /Ferreiro Duarte/.test(V.lastLog()), `vila não vende item avançado: "${V.lastLog()}"`);
+V.act({ a: 'buy', id: 'scroll_return' }); await V.idle(300);
+ok(V.char.inv.scroll_return === 2, 'vila não vende pergaminho');
+V.act({ a: 'buy', id: 'leather_armor' }); await V.idle(300);
+ok(V.char.inv.leather_armor === 1, 'vila vende Armadura de Couro');
 V.ws.close();
 
 for (const n of NAMES) {

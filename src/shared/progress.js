@@ -8,7 +8,7 @@
 //   {k:'loot', lid, item, n?, x, z} {k:'lootGone', lid} {k:'hurt', dmg} {k:'death', by, lost, pct, items, resetAt}
 //   {k:'respawn', pos} {k:'heal', n, color} {k:'pickup', item, n?} {k:'equip', item} {k:'closeDialog'}
 //   {k:'teleport', x, z, region} {k:'chest', id} {k:'classChosen', cls} {k:'skillUp', node} {k:'buff', id, until}
-import { ITEMS, SLOTS, rollDrop, rollTreasure, damageReduction } from './items.js';
+import { ITEMS, SLOTS, SHOP_LISTS, FARM, rollDrop, rollTreasure, damageReduction } from './items.js';
 import { QUESTS } from './quests.js';
 import { TYPES } from './mobs.js';
 import {
@@ -21,6 +21,8 @@ import {
 /** quem dá cada missão (NPC) */
 export const questGiver = (qd) => NPCS[qd?.giver || 'elder'];
 const SHOPS = Object.values(NPCS).filter((n) => n.role === 'shop');
+/** quem vende este item (para a mensagem de "procure fulano") */
+export const sellersOf = (id) => SHOPS.filter((n) => SHOP_LISTS[n.sells]?.includes(id));
 
 export const HP_BASE = 100;
 export const HP_PER_LEVEL = 15;
@@ -48,7 +50,7 @@ export function newCharacter() {
     level: 1, xp: 0, gold: 10, maxHp: HP_BASE, hp: HP_BASE, kills: 0,
     inv: { potion: 3, wood_sword: 1 }, equipped: 'wood_sword', armor: null, helmet: null,
     quest: { idx: 0, status: 'available', progress: 0 }, pos: [...SPAWN_POINT],
-    cls: null, skills: {}, chests: {}, home: { rack: {}, chest: {}, safe: 0 }, deaths: { period: 0, n: 0 }, buffs: {},
+    cls: null, skills: {}, chests: {}, home: { rack: {}, chest: {}, safe: 0 }, deaths: { period: 0, n: 0 }, buffs: {}, farm: {},
   };
 }
 
@@ -98,8 +100,11 @@ export function normalizeCharacter(d) {
     cls, skills, chests,
     home: { rack: cleanBag(h.rack, gearOk), chest: cleanBag(h.chest, potionOk), safe: int(h.safe, 0, 1e9, 0) },
     deaths: { period: int(d.deaths?.period, 0, 1e7, 0), n: int(d.deaths?.n, 0, 1000, 0) },
-    buffs: {},
+    buffs: {}, farm: {},
   };
+  if (d.farm && typeof d.farm === 'object') { // monstros abatidos há pouco (anti-farm), no máximo 300
+    for (const [k, t] of Object.entries(d.farm).slice(0, 300)) if (typeof k === 'string' && k.length < 40 && Number.isFinite(t) && now - t < FARM.window) c.farm[k] = t;
+  }
   if (d.buffs && typeof d.buffs === 'object') { // pergaminhos ainda valendo
     for (const [id, until] of Object.entries(d.buffs)) if (BUFFS[id] && Number.isFinite(until) && until > now && until < now + 600e3) c.buffs[id] = until;
   }
@@ -114,11 +119,11 @@ export function normalizeCharacter(d) {
 
 /** Só o que vai para o cliente / banco (sem campos de runtime) */
 export function publicCharacter(c) {
-  const { level, xp, gold, maxHp, hp, kills, inv, equipped, armor, helmet, quest, pos, cls, skills, chests, home, deaths, buffs } = c;
+  const { level, xp, gold, maxHp, hp, kills, inv, equipped, armor, helmet, quest, pos, cls, skills, chests, home, deaths, buffs, farm } = c;
   return {
     level, xp, gold, maxHp, hp: Math.ceil(hp), kills, inv: { ...inv }, equipped, armor, helmet, quest: { ...quest }, pos: [...pos],
     cls: cls || null, skills: { ...skills }, chests: { ...chests },
-    home: { rack: { ...home.rack }, chest: { ...home.chest }, safe: home.safe }, deaths: { ...deaths }, buffs: { ...(buffs || {}) },
+    home: { rack: { ...home.rack }, chest: { ...home.chest }, safe: home.safe }, deaths: { ...deaths }, buffs: { ...(buffs || {}) }, farm: { ...(farm || {}) },
   };
 }
 
@@ -181,24 +186,38 @@ export class LootBag {
 
 // ---------- Abate ----------
 /** Monstro morto com crédito para este jogador. at = {x, z} do monstro. */
-export function kill(c, type, at, ctx, fx) {
+export function kill(c, type, at, ctx, fx, key = null) {
   const def = TYPES[type];
   if (!def) return;
   const rand = ctx.rand || Math.random;
+  // anti-farm: se VOCÊ matou este mesmo monstro (mesmo ponto de nascimento) há menos de 30 min, ele é "de respawn"
+  const clock = ctx.clock ?? Date.now();
+  c.farm = c.farm || {};
+  const farmed = !!key && clock - (c.farm[key] || -Infinity) < FARM.window;
+  if (key) {
+    c.farm[key] = clock;
+    const keys = Object.keys(c.farm);
+    if (keys.length > 300) for (const k of keys) if (clock - c.farm[k] >= FARM.window) delete c.farm[k];
+  }
   const g = def.gold[0] + Math.floor(rand() * (def.gold[1] - def.gold[0] + 1));
   c.gold += g;
   c.kills++;
   fx.push({ k: 'sfx', name: 'coin', at });
   fx.push({ k: 'float', text: `+${g} 🪙`, color: '#ffd65c', size: 16, at, h: def.height + 1 });
   fx.push({ k: 'log', text: `${def.name} derrotado! +${g} 🪙`, cls: 'gold' });
-  if (c.kills % DROP_EVERY === 0) {
-    ctx.loot.add(rollDrop(false, rand), at.x, at.z, ctx.now, fx);
+  if (c.kills % DROP_EVERY === 0 && (!farmed || rand() < FARM.dropChance)) {
+    ctx.loot.add(rollDrop(false, rand, farmed), at.x, at.z, ctx.now, fx);
     fx.push({ k: 'sfx', name: 'drop', at });
     fx.push({ k: 'log', text: '🎁 Um item caiu! Encoste nele para pegar.', cls: 'good' });
   }
   if (def.boss) {
-    ctx.loot.add(rollDrop(true, rand), at.x + 1.5, at.z, ctx.now, fx);
-    fx.push({ k: 'log', text: '🎁 O chefe deixou cair um equipamento raro!', cls: 'good' });
+    if (!farmed) {
+      ctx.loot.add(rollDrop(true, rand), at.x + 1.5, at.z, ctx.now, fx);
+      fx.push({ k: 'log', text: '🎁 O chefe deixou cair um equipamento raro!', cls: 'good' });
+    } else if (rand() < FARM.bossDropChance) {
+      ctx.loot.add(rollDrop(false, rand, true), at.x + 1.5, at.z, ctx.now, fx);
+      fx.push({ k: 'log', text: 'O chefe renasceu fraco: só deixou um item comum. (Equipamento raro: 1 vez a cada 30 min por chefe)', cls: 'info' });
+    } else fx.push({ k: 'log', text: 'O chefe renasceu fraco e não deixou equipamento. (Equipamento raro: 1 vez a cada 30 min por chefe)', cls: 'info' });
   }
   const q = c.quest, qd = QUESTS[q.idx];
   if (q.status === 'active' && qd?.target === type) {
@@ -286,7 +305,12 @@ export function act(c, a, ctx, fx) {
   switch (a.a) {
     case 'buy': {
       if (!it || !it.price) return deny(fx);
-      if (!nearShop(ctx.pos)) return deny(fx, 'Vá até uma loja (Mercadora Lia na vila ou Ferreiro Duarte no castelo) para comprar.');
+      const here = SHOPS.filter((n) => near(ctx.pos, n.x, n.z, INTERACT_RANGE.npc));
+      if (!here.length) return deny(fx, 'Vá até uma loja para comprar.');
+      if (!here.some((n) => SHOP_LISTS[n.sells]?.includes(a.id))) {
+        const who = sellersOf(a.id).map((n) => `${n.name} (${n.where})`).join(' ou ');
+        return deny(fx, `${here[0].name} não vende ${it.name}.${who ? ` Procure ${who}.` : ''}`);
+      }
       if (c.gold < it.price) return deny(fx);
       c.gold -= it.price;
       addItem(c.inv, a.id);

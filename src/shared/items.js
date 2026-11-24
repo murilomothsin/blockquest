@@ -42,15 +42,26 @@ export const ITEMS = {
   elven_helmet: { name: 'Elmo Élfico', icon: '⛑️', kind: 'helmet', def: 9, color: 0x5fd6a0, price: null, sell: 160, desc: 'Só cai de monstros.' },
 };
 
-export const SHOP = [
-  'potion', 'big_potion', 'scroll_return', 'scroll_shield', 'scroll_haste', 'scroll_fury',
-  'wood_sword', 'iron_sword', 'steel_sword', 'rune_blade',
-  'iron_dagger', 'steel_dagger',
-  'short_bow', 'long_bow',
-  'apprentice_staff', 'crystal_staff', 'rune_staff',
-  'leather_armor', 'iron_armor', 'steel_armor', 'rune_armor',
-  'leather_helmet', 'iron_helmet', 'steel_helmet', 'rune_helmet',
-];
+/**
+ * Lojas: cada vendedor tem o seu catálogo.
+ *  basic  = Mercadora Lia (vila): o básico do começo do jogo (até ~nível 4)
+ *  smith  = Ferreiro Duarte (castelo): armas e armaduras de todos os níveis
+ *  arcane = magos / mercadores arcanos: pergaminhos e cajados (itens mágicos)
+ */
+export const SHOP_LISTS = {
+  basic: ['potion', 'big_potion', 'wood_sword', 'iron_sword', 'iron_dagger', 'short_bow', 'leather_armor', 'leather_helmet'],
+  smith: [
+    'potion', 'big_potion',
+    'wood_sword', 'iron_sword', 'steel_sword', 'rune_blade',
+    'iron_dagger', 'steel_dagger',
+    'short_bow', 'long_bow',
+    'leather_armor', 'iron_armor', 'steel_armor', 'rune_armor',
+    'leather_helmet', 'iron_helmet', 'steel_helmet', 'rune_helmet',
+  ],
+  arcane: ['scroll_return', 'scroll_shield', 'scroll_haste', 'scroll_fury', 'apprentice_staff', 'crystal_staff', 'rune_staff', 'potion', 'big_potion'],
+};
+/** tudo o que é vendido em alguma loja */
+export const SHOP = [...new Set(Object.values(SHOP_LISTS).flat())];
 
 /** Espaços de equipamento: tipo do item → campo no jogador */
 export const SLOTS = { weapon: 'equipped', armor: 'armor', helmet: 'helmet' };
@@ -92,6 +103,10 @@ const DROPS = [
   ['rune_blade', 1.5], ['elven_bow', 1.5], ['shadow_dagger', 1.5], ['ancient_staff', 1.5], ['elven_armor', 1.5], ['elven_helmet', 1.5],
 ];
 
+/** monstro que você já matou e renasceu (farm): menos chance e só coisa básica */
+export const FARM = { window: 30 * 60e3, dropChance: 0.35, bossDropChance: 0.3 };
+const BASIC_DROPS = [['potion', 60], ['big_potion', 10], ['leather_armor', 8], ['leather_helmet', 8], ['wood_sword', 6], ['iron_dagger', 4], ['iron_sword', 4]];
+
 const BOSS_DROPS = ['rune_blade', 'elven_bow', 'shadow_dagger', 'ancient_staff', 'rune_armor', 'elven_armor', 'rune_helmet', 'elven_helmet'];
 
 const pickWeighted = (list, rand) => {
@@ -102,7 +117,8 @@ const pickWeighted = (list, rand) => {
 };
 
 /** Sorteia o item que cai a cada 5 abates. Chefes sempre deixam um equipamento raro. */
-export function rollDrop(boss = false, rand = Math.random) {
+export function rollDrop(boss = false, rand = Math.random, basic = false) {
+  if (basic) return pickWeighted(BASIC_DROPS, rand);
   if (boss) return BOSS_DROPS[Math.floor(rand() * BOSS_DROPS.length)];
   return pickWeighted(DROPS, rand);
 }

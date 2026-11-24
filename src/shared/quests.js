@@ -39,7 +39,7 @@ export const QUESTS = [
     where: { x: 108, z: -212, label: 'Covil dos Lobos (leste do castelo)' },
     intro: 'Então você é o herói da Vila Pedraverde. Ótimo. Uma alcateia de Lobos Cinzentos está atacando nossas patrulhas no planalto, a leste das muralhas. Eles são rápidos e vêm em bando. Derrote 8 deles.',
     progressText: (n, c) => `Lobos derrotados: ${n}/${c}`,
-    doneText: 'Bom trabalho. As patrulhas voltaram inteiras. O Ferreiro Duarte, aqui no pátio, vende o mesmo que a Mercadora Lia, e a fonte do castelo cura como o poço da vila.',
+    doneText: 'Bom trabalho. As patrulhas voltaram inteiras. Aqui no pátio o Ferreiro Duarte vende armas e armaduras melhores que as da vila, o Mago Eldrin vende pergaminhos e cajados, e a fonte cura como o poço.',
     reward: { xp: 1300, gold: 350, items: { big_potion: 3, scroll_shield: 2 } },
   },
   {

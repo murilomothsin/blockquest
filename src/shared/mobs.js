@@ -1,6 +1,24 @@
 // Simulação dos monstros em dados puros (sem three.js / DOM).
 // Roda no navegador no modo offline e no servidor no modo online — a mesma IA nos dois.
-import { SAFE_ZONES, DUNGEON_SPAWNS, ZONES, CURSED, TOWER } from './worldData.js';
+import { SAFE_ZONES, DUNGEON_SPAWNS, ZONES, CURSED, TOWER, dungeonAt } from './worldData.js';
+
+/**
+ * Respawn: na superfície normal; nas dungeons e nas Ruínas Amaldiçoadas bem mais lento e GRADUAL
+ * (um monstro por vez a cada `gap` s, e nunca na frente de um jogador).
+ */
+export const RESPAWN = {
+  dungeonMul: 6, // mina/torre: esqueleto 30 s → 3 min
+  ruinsMul: 3, // ruínas amaldiçoadas
+  bossMul: 4, // chefes da superfície (Golem, Rainha); chefes de dungeon usam dungeonMul (Goblin Minerador 12 min)
+  gap: 12, // s entre dois renascimentos na mesma área
+  hiddenR: 16, // não renasce se um jogador estiver a menos disso, com visão
+};
+/** área de respawn gradual: id da dungeon, 'ruins' ou null (superfície normal) */
+export function respawnArea(x, z) {
+  const d = dungeonAt(x, z);
+  if (d) return d.region === 'tower' ? 'tower' : d.id;
+  return Math.hypot(x - CURSED.x, z - CURSED.z) < CURSED.r + 6 ? 'ruins' : null;
+}
 
 /**
  * Encontros selvagens estilo Pokémon GBA: andando no meio das árvores, a cada
@@ -113,6 +131,8 @@ export class MobSim {
     this.walk = new Map(); // jogador → {x, z, walked, cd}
     this.nextId = 1;
     this.nextRock = 1;
+    this.time = 0;
+    this.gate = new Map(); // área → próximo instante (s) em que alguém pode renascer
     for (const sp of SPAWNS) {
       for (let i = 0; i < sp.n; i++) {
         const a = rand() * Math.PI * 2, d = Math.sqrt(rand()) * sp.r;
@@ -126,6 +146,7 @@ export class MobSim {
     const m = {
       id: this.nextId++, type, def, x, z, y: 0, rot: this.rand() * 6,
       spawnX: x, spawnZ: z, hp: def.hp, state: 'idle', leashed: false,
+      key: opts.wild ? null : `${type}@${Math.round(x)},${Math.round(z)}`, area: respawnArea(x, z),
       wanderX: x, wanderZ: z, wanderT: this.rand() * 3,
       atkCd: 0, pendingHit: 0, deadT: 0, t: 0, moving: 0, provokedT: 0,
       throwCd: 2, windup: 0, emergeT: 0, lastHitT: -99,
@@ -167,12 +188,14 @@ export class MobSim {
   kill(m) {
     m.hp = 0;
     m.state = 'dead';
-    m.deadT = m.def.respawn;
+    const mul = m.area && m.area !== 'ruins' ? RESPAWN.dungeonMul : m.area === 'ruins' ? (m.def.boss ? RESPAWN.bossMul : RESPAWN.ruinsMul) : m.def.boss ? RESPAWN.bossMul : 1;
+    m.deadT = m.def.respawn * mul;
+    m.deadFor = m.deadT;
     m.windup = 0;
     m.pendingHit = 0;
     const credit = [...m.contrib].filter(([, t]) => m.t - t <= CREDIT_WINDOW).map(([pid]) => pid);
     m.contrib.clear();
-    this.emit({ e: 'killed', id: m.id, type: m.type, credit, x: m.x, z: m.z });
+    this.emit({ e: 'killed', id: m.id, type: m.type, key: m.key, credit, x: m.x, z: m.z });
   }
 
   /** Golpe em arco (modo offline: o próprio cliente resolve). */
@@ -190,6 +213,7 @@ export class MobSim {
   // ---------- Loop ----------
   /** players: [{id, x, z, dead}] */
   update(dt, players) {
+    this.time += dt;
     const valid = (p) => p && !p.dead && !this.world.isSafe(p.x, p.z);
     const byId = new Map(players.map((p) => [p.id, p]));
 
@@ -200,8 +224,15 @@ export class MobSim {
 
       if (m.state === 'dead') {
         m.deadT -= dt;
-        const since = def.respawn - m.deadT;
+        const since = (m.deadFor ?? def.respawn) - m.deadT;
         if (m.wild) { if (since > 1.3) this.remove(m); continue; } // selvagens não renascem
+        if (m.deadT <= 0 && m.area) { // dungeon/ruínas: um de cada vez e escondido dos jogadores
+          if (this.time < (this.gate.get(m.area) || 0)) continue;
+          const seen = players.some((p) => !p.dead && Math.hypot(p.x - m.spawnX, p.z - m.spawnZ) < RESPAWN.hiddenR
+            && (!this.world.los || this.world.los(p.x, p.z, m.spawnX, m.spawnZ)));
+          if (seen) continue;
+          this.gate.set(m.area, this.time + RESPAWN.gap);
+        }
         if (m.deadT <= 0) {
           m.state = 'idle'; m.hp = def.hp; m.targetId = null; m.leashed = false;
           m.x = m.spawnX; m.z = m.spawnZ; m.y = 0;

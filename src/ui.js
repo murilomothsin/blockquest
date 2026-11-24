@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ZONES, WORLD_RADIUS } from './world.js';
-import { ITEMS, SHOP, CATEGORIES, category, itemStats, damageReduction } from './items.js';
+import { ITEMS, SHOP, SHOP_LISTS, CATEGORIES, category, itemStats, damageReduction } from './items.js';
 import { ACTIONS, RESERVED, keyLabel } from './input.js';
 import { roleOf } from './shared/roles.js';
 import { NOVICE_MAX_LEVEL } from './shared/progress.js';
@@ -527,12 +527,20 @@ export class UI {
 
   renderShop(body, tabs) {
     const { player, buy, sell } = this.game;
-    $('mtitle').replaceChildren(h('span', {}, `🛒 ${this.shopName || 'Mercadora Lia'} `), h('span', { class: 'goldtag' }, `🪙 ${player.gold}`));
+    const npc = this.shopNpc || { name: 'Mercadora Lia', sells: 'basic' };
+    const icon = npc.sells === 'arcane' ? '🔮' : npc.sells === 'smith' ? '⚒️' : '🛒';
+    $('mtitle').replaceChildren(h('span', {}, `${icon} ${npc.name} `), h('span', { class: 'goldtag' }, `🪙 ${player.gold}`));
     for (const [id, label] of [['buy', 'Comprar'], ['sell', 'Vender']]) {
       tabs.appendChild(h('button', { class: `tab ${this.shopTab === id ? 'active' : ''}`, onclick: () => { this.shopTab = id; this.renderModal(); } }, label));
     }
     if (this.shopTab === 'buy') {
-      body.append(...this.grouped(SHOP, (id) => {
+      const NOTE = {
+        basic: 'Itens para começar a aventura. Equipamentos melhores: Ferreiro Duarte, no Castelo de Pedralta (norte). Pergaminhos e cajados: Mago Eldrin, no castelo.',
+        smith: 'Armas e armaduras de todos os níveis. Pergaminhos e cajados: com o Mago Eldrin, aqui no pátio.',
+        arcane: 'Pergaminhos e cajados: itens mágicos só com magos e mercadores arcanos.',
+      };
+      body.append(h('p', { class: 'shopnote' }, NOTE[npc.sells] || ''));
+      body.append(...this.grouped(SHOP_LISTS[npc.sells] || SHOP, (id) => {
         const it = ITEMS[id];
         return this.itemCard(id, {
           owned: player.inv[id] || 0,
