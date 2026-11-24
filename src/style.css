@@ -117,6 +117,24 @@ button.keycap-btn.listening { background: #f5b82e; animation: pulse .8s infinite
 #chatlog .whisper { color: #ffb8ec; }
 #chatlog .whisper b { color: #ff8ad8; }
 #chat.open #chatlog div { opacity: 1 !important; }
+#chatlog .pname { pointer-events: auto; cursor: pointer; }
+#chatlog .pname:hover { text-decoration: underline; }
+#pmenu { position: fixed; z-index: 60; background: rgba(14,16,30,.96); border: 2px solid #3a4266; border-radius: 10px; padding: 6px; display: flex; flex-direction: column; gap: 4px; min-width: 150px; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+#pmenu .pm-title { font-weight: 800; color: #9fe3ff; padding: 2px 6px 4px; border-bottom: 1px solid #3a4266; margin-bottom: 2px; }
+#pmenu button { font: inherit; font-size: 13px; text-align: left; background: #262c48; color: #fff; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+#pmenu button:hover { background: #343c62; }
+#pmenu button.danger, #report button.danger { background: #8e2a2a; }
+#pmenu button.danger:hover, #report button.danger:hover { background: #b33636; }
+#report-bg { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; }
+#report { width: 360px; background: #161a2e; border: 2px solid #f5b82e; border-radius: 14px; padding: 16px 18px; color: #fff; }
+#report h3 { margin: 0 0 6px; }
+#report p { margin: 0 0 10px; font-size: 12px; color: #b9c2d0; }
+#report .reasons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 13px; margin-bottom: 10px; }
+#report .reasons label { background: #232842; border-radius: 6px; padding: 6px 8px; cursor: pointer; }
+#report textarea { width: 100%; box-sizing: border-box; height: 64px; resize: none; font: inherit; font-size: 13px; background: #0d1020; color: #fff; border: 1px solid #3a4266; border-radius: 6px; padding: 6px 8px; }
+#report .err { color: #ff7b7b; font-size: 12px; min-height: 16px; margin: 4px 0; }
+#report .row { display: flex; justify-content: flex-end; gap: 8px; }
+#report button { font: inherit; font-weight: 700; border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; background: #323a5c; color: #fff; }
 #chatinput { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; border: 2px solid #f5b82e; background: rgba(10,12,24,.92); color: #fff; outline: none; }
 
 /* ---------- Login ---------- */

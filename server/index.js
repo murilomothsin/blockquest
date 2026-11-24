@@ -8,6 +8,17 @@ import {
   HttpError, register, login, createSession, userFromToken, logout,
   loadCharacter, saveCharacter, purgeExpiredSessions,
 } from './auth.js';
+import { createGame } from './game.js';
+import { filterText } from './filter.js';
+import { q } from './db.js';
+
+// moderação do chat
+const STRIKES_TO_MUTE = 3; // palavrões dentro da janela → silêncio
+const STRIKE_WINDOW = 60e3;
+const MUTE_MS = 60e3;
+const HISTORY = 20; // últimas mensagens por jogador (anexadas às denúncias)
+const REPORT_REASONS = ['ofensa', 'assedio', 'spam', 'trapaca', 'nome', 'outro'];
+const histories = new Map(); // userId → [{at, to, text}] (fica na memória mesmo depois que o jogador sai)
 
 const PORT = Number(process.env.PORT) || 3001;
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -110,6 +121,7 @@ const broadcast = (msg, exceptId = null) => {
   const data = JSON.stringify(msg);
   for (const p of players.values()) if (p.id !== exceptId && p.ws.readyState === 1) p.ws.send(data);
 };
+const game = createGame({ players, send });
 
 const f = (v, lim = 1e4) => (Number.isFinite(v) ? Math.max(-lim, Math.min(lim, v)) : 0);
 function cleanState(m) {
@@ -140,7 +152,8 @@ wss.on('connection', (ws) => {
       // mesma conta entrou de novo: derruba a conexão antiga
       const old = players.get(user.id);
       if (old) { send(old.ws, { t: 'kicked', message: 'Sua conta entrou em outro lugar.' }); old.ws.close(4001, 'dup'); players.delete(user.id); }
-      me = { id: user.id, name: user.username, ws, state: null, lastChat: 0 };
+      if (!histories.has(user.id)) histories.set(user.id, []);
+      me = { id: user.id, name: user.username, ws, state: null, lastChat: 0, history: histories.get(user.id), strikes: [], mutedUntil: old?.mutedUntil || 0 };
       players.set(me.id, me);
       send(ws, {
         t: 'welcome', id: me.id, name: me.name,
@@ -154,13 +167,33 @@ wss.on('connection', (ws) => {
     switch (msg.t) {
       case 'state': me.state = cleanState(msg); break;
       case 'chat': {
-        const text = String(msg.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
+        let text = String(msg.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
         const now = Date.now();
         if (!text || now - me.lastChat < 500) return;
         me.lastChat = now;
-        if (typeof msg.to === 'string' && msg.to) { // mensagem privada (sussurro)
-          const target = [...players.values()].find((p) => p.name.toLowerCase() === msg.to.toLowerCase());
-          if (!target) { send(ws, { t: 'sys', text: `${msg.to.slice(0, 16)} não está online.` }); return; }
+        if (me.mutedUntil > now) {
+          send(ws, { t: 'sys', text: `🔇 Você está silenciado por linguagem ofensiva. Aguarde ${Math.ceil((me.mutedUntil - now) / 1000)} s.` });
+          return;
+        }
+        // filtro de palavrões; quem insiste leva silêncio temporário
+        const f = filterText(text);
+        text = f.text;
+        if (f.hits) {
+          me.strikes = (me.strikes || []).filter((t) => now - t < STRIKE_WINDOW);
+          for (let i = 0; i < f.hits; i++) me.strikes.push(now);
+          if (me.strikes.length >= STRIKES_TO_MUTE) {
+            me.mutedUntil = now + MUTE_MS;
+            me.strikes = [];
+            send(ws, { t: 'sys', text: `🔇 Você foi silenciado por ${MUTE_MS / 1000} s por linguagem ofensiva.` });
+          }
+        }
+        // histórico curto (servidor) usado como prova nas denúncias
+        const to = typeof msg.to === 'string' && msg.to ? msg.to.slice(0, 16) : null;
+        me.history.push({ at: now, to, text: String(msg.text ?? '').slice(0, 200) });
+        if (me.history.length > HISTORY) me.history.shift();
+        if (to) { // mensagem privada (sussurro)
+          const target = [...players.values()].find((p) => p.name.toLowerCase() === to.toLowerCase());
+          if (!target) { send(ws, { t: 'sys', text: `${to} não está online.` }); return; }
           if (target.id === me.id) { send(ws, { t: 'sys', text: 'Você não pode sussurrar para si mesmo.' }); return; }
           const out = { t: 'whisper', id: me.id, from: me.name, toId: target.id, to: target.name, text };
           send(target.ws, out);
@@ -171,6 +204,25 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'save': saveCharacter(me.id, msg.data); break;
+      case 'hit': game.handleHit(me, msg); break;
+      case 'report': {
+        const reply = (text) => send(ws, { t: 'sys', text });
+        const name = String(msg.name ?? '').slice(0, 16);
+        const reason = REPORT_REASONS.includes(msg.reason) ? msg.reason : 'outro';
+        const note = String(msg.note ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
+        const target = [...players.values()].find((p) => p.name.toLowerCase() === name.toLowerCase())
+          || (() => { const u = q.userByName.get(name); return u && { id: u.id, name: u.username, history: histories.get(u.id) || [] }; })();
+        if (!target) return reply(`Jogador "${name}" não encontrado.`);
+        if (target.id === me.id) return reply('Você não pode denunciar a si mesmo.');
+        const now = Date.now();
+        if (q.recentReport.get(me.id, target.id, now - 10 * 60e3).n) return reply(`Você já denunciou ${target.name} há pouco. Nossa equipe vai analisar.`);
+        if (q.reportsBy.get(me.id, now - 60 * 60e3).n >= 10) return reply('Limite de denúncias por hora atingido. Tente mais tarde.');
+        const evidence = JSON.stringify({ note, messages: target.history || [] });
+        q.insertReport.run(me.id, target.id, reason, evidence, now);
+        console.log(`[denúncia] ${me.name} → ${target.name} (${reason})`);
+        reply(`✅ Denúncia de ${target.name} enviada. Obrigado! As mensagens recentes foram anexadas como prova.`);
+        break;
+      }
       default: break;
     }
   });

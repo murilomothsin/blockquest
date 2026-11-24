@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { buildWorld, makeLabel } from './world.js';
 import { createCharacter, animateCharacter, flash, setGear } from './character.js';
-import { EnemyManager } from './enemies.js';
+import { EnemyManager, TYPES } from './enemies.js';
 import { QUESTS } from './quests.js';
 import { ITEMS, ATTACK, SLOTS, rollDrop, damageReduction } from './items.js';
 import { Input, keyLabel } from './input.js';
@@ -44,13 +44,9 @@ scene.add(sun, sun.target);
 const world = buildWorld(scene);
 const sound = new Sound();
 const sfx = (name, pos = null, vol = 1) => sound.play(name, pos, vol);
-const enemies = new EnemyManager(scene, world, sfx);
 const input = new Input(renderer.domElement);
 const ui = new UI(input, sound);
 const loot = new Loot(scene);
-const projectiles = new Projectiles(scene, world, enemies, (hit) => reportHits([hit]));
-projectiles.onWorld = (pos) => sfx('arrowHit', pos, 0.7);
-enemies.onWild = (e) => ui.log(`⚠️ Um ${e.def.name.toLowerCase()} saltou do meio das árvores!`, 'bad');
 // clique em qualquer botão da interface
 document.addEventListener('click', (e) => { if (e.target.closest?.('button')) sfx('ui'); });
 
@@ -58,6 +54,11 @@ document.addEventListener('click', (e) => { if (e.target.closest?.('button')) sf
 const session = await startSession();
 let net = null; // conexão com o servidor (só online)
 let remote = null; // outros jogadores
+
+// Monstros: offline a IA roda aqui; online o servidor manda e todo mundo vê os mesmos monstros
+const enemies = new EnemyManager(scene, world, sfx, { online: session.online });
+const projectiles = new Projectiles(scene, world, enemies, (e, dir) => enemies.arrowHit(e, dir.x, dir.z, rollDamage));
+projectiles.onWorld = (pos) => sfx('arrowHit', pos, 0.7);
 
 // ---------- Save ----------
 const SAVE_KEY = 'blockquest-save-v2';
@@ -329,13 +330,18 @@ function currentTarget() {
 }
 
 // ---------- Combate ----------
-function reportHits(hits) {
-  for (const hh of hits) {
-    sfx(hh.crit ? 'crit' : 'hit', hh.enemy.pos);
-    ui.float(headPos(hh.enemy.pos, hh.enemy.def.height + 0.4), hh.crit ? `${hh.dmg}!` : `${hh.dmg}`, hh.crit ? '#ffd84a' : '#ffffff', hh.crit ? 28 : 20);
-    if (hh.killed) onKill(hh.enemy);
-  }
+/** Número de dano em cima do monstro. `mine`: golpe meu (amarelo/branco) ou de outro jogador (cinza, menor). */
+function reportHit({ enemy, dmg, crit, mine }) {
+  if (mine) sfx(crit ? 'crit' : 'hit', enemy.pos);
+  const color = mine ? (crit ? '#ffd84a' : '#ffffff') : '#b9c2d0';
+  ui.float(headPos(enemy.pos, enemy.def.height + 0.4), crit ? `${dmg}!` : `${dmg}`, color, mine ? (crit ? 28 : 20) : 15);
 }
+enemies.handlers = {
+  onDamage: reportHit,
+  onKill: (e) => onKill(e),
+  onPlayerHit: (dmg, e) => onPlayerHit(dmg, e),
+  onWild: (e) => ui.log(`⚠️ Um ${e.def.name.toLowerCase()} saltou do meio das árvores!`, 'bad'),
+};
 
 function attack() {
   const w = weapon();
@@ -357,7 +363,8 @@ function attack() {
     sfx('swing');
     setTimeout(() => {
       if (player.dead) return;
-      reportHits(enemies.hitArc(player.pos, facing(), ATTACK.melee.range, rollDamage));
+      const f = facing();
+      enemies.melee(player.pos.x, player.pos.z, f.x, f.z, ATTACK.melee.range, rollDamage);
     }, 140);
   }
 }
@@ -448,6 +455,7 @@ if (session.online) {
   net = new Net(session.token);
   const onlineText = () => `🟢 Online · ${remote.map.size + 1} jogador${remote.map.size ? 'es' : ''}`;
   net.on('welcome', (m) => {
+    enemies.myId = m.id;
     remote.clear();
     for (const p of m.players) remote.add(p);
     ui.netStatus(onlineText());
@@ -458,6 +466,12 @@ if (session.online) {
   net.on('leave', (m) => { remote.remove(m.id); ui.netStatus(onlineText()); ui.chatMsg(null, `${m.name} saiu.`, 'sys'); });
   net.on('snap', (m) => remote.snapshot(m.players, net.id));
 
+  // monstros vindos do servidor
+  enemies.send = (msg) => net.send(msg);
+  net.on('mobs', (m) => enemies.applySnapshot(m.m));
+  net.on('mev', (ev) => enemies.onEvent(ev));
+  net.on('hurt', (m) => onPlayerHit(m.dmg, { def: TYPES[m.mob] || { name: 'um monstro' } }));
+
   // ---------- Chat: geral (todos + balão na cabeça), sussurro (/w), ignorar ----------
   const IGNORE_KEY = 'blockquest-ignored';
   const ignored = new Set(JSON.parse(localStorage.getItem(IGNORE_KEY) || '[]'));
@@ -467,7 +481,7 @@ if (session.online) {
 
   net.on('chat', (m) => {
     if (ignored.has(m.from.toLowerCase())) return;
-    ui.chatMsg(m.from, m.text, m.id === net.id ? 'me' : '');
+    ui.chatMsg(m.from, m.text, m.id === net.id ? 'me' : '', m.id === net.id ? null : m.from);
     const anchor = anchorFor(m.id);
     if (anchor) bubbles.say(m.id, anchor, m.text);
     if (m.id !== net.id) sfx('ui');
@@ -476,12 +490,26 @@ if (session.online) {
     const mine = m.id === net.id;
     if (!mine && ignored.has(m.from.toLowerCase())) return;
     if (!mine) lastWhisperFrom = m.from;
-    ui.chatMsg(mine ? `[Para ${m.to}]` : `[De ${m.from}]`, m.text, 'whisper');
+    ui.chatMsg(mine ? `[Para ${m.to}]` : `[De ${m.from}]`, m.text, 'whisper', mine ? null : m.from);
     const anchor = anchorFor(m.id); // só quem participa vê o balão do sussurro
     if (anchor) bubbles.say(m.id, anchor, m.text, { whisper: true });
     if (!mine) sfx('pickup');
   });
   net.on('sys', (m) => ui.chatMsg(null, m.text, 'sys'));
+
+  // ---------- Moderação: menu no nome do jogador e denúncia ----------
+  const ignore = (name) => {
+    ignored.add(name.toLowerCase()); saveIgnored();
+    ui.chatMsg(null, `Você não vai mais ver mensagens de ${name}.`, 'sys');
+  };
+  const report = (name) => ui.reportDialog(name, ({ reason, note }) => net.send({ t: 'report', name, reason, note }));
+  ui.onPlayerMenu = (name, x, y) => ui.playerMenu(name, x, y, [
+    { label: '💬 Sussurrar', run: () => { ui.openChat((txt) => sendChat(txt)); const inp = document.getElementById('chatinput'); inp.value = `/w ${name} `; } },
+    ignored.has(name.toLowerCase())
+      ? { label: '👁️ Deixar de ignorar', run: () => sendChat(`/designorar ${name}`) }
+      : { label: '🔇 Ignorar', run: () => ignore(name) },
+    { label: '🚩 Denunciar', danger: true, run: () => report(name) },
+  ]);
 
   sendChat = (raw) => {
     const text = raw.trim();
@@ -499,15 +527,17 @@ if (session.online) {
         return net.chat(arg, lastWhisperFrom);
       case '/ignorar':
         if (!arg) return ui.chatMsg(null, `Ignorados: ${[...ignored].join(', ') || 'ninguém'}`, 'sys');
-        ignored.add(arg.toLowerCase()); saveIgnored();
-        return ui.chatMsg(null, `Você não vai mais ver mensagens de ${arg}.`, 'sys');
+        return ignore(arg);
+      case '/denunciar':
+        if (!arg) return ui.chatMsg(null, 'Use: /denunciar nome (ou clique no nome da pessoa no chat)', 'sys');
+        return report(rest[0]);
       case '/designorar':
         ignored.delete(arg.toLowerCase()); saveIgnored();
         return ui.chatMsg(null, `${arg} voltou a aparecer no seu chat.`, 'sys');
       case '/online':
         return ui.chatMsg(null, `Online: ${[net.id ? session.user.username : null, ...remote.list().map((p) => p.name)].filter(Boolean).join(', ')}`, 'sys');
       case '/ajuda': case '/?':
-        return ui.chatMsg(null, 'Comandos: /w nome msg (sussurrar) · /r msg (responder) · /ignorar nome · /designorar nome · /online', 'sys');
+        return ui.chatMsg(null, 'Comandos: /w nome msg (sussurrar) · /r msg (responder) · /ignorar nome · /designorar nome · /denunciar nome · /online. Dica: clique no nome de alguém no chat.', 'sys');
       default:
         if (cmd.startsWith('/')) return ui.chatMsg(null, 'Comando desconhecido. Digite /ajuda', 'sys');
         return net.chat(text);
@@ -637,7 +667,7 @@ function update(dt) {
     n.char.armL.rotation.x = Math.sin(t * 1.5 + n.pos.x) * 0.08;
   }
 
-  enemies.update(dt, player, camera, { onPlayerHit });
+  enemies.update(dt, player, camera);
   projectiles.update(dt);
   loot.update(dt, player, onPickup);
   world.update(t, dt);

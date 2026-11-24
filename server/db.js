@@ -33,6 +33,17 @@ db.exec(`
     data        TEXT NOT NULL,
     updated_at  INTEGER NOT NULL
   );
+
+  -- denúncias de jogadores; "evidence" = últimas mensagens do denunciado, gravadas pelo servidor
+  CREATE TABLE IF NOT EXISTS reports (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    target_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reason      TEXT NOT NULL,
+    evidence    TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'aberta'
+  );
 `);
 
 export const q = {
@@ -47,4 +58,7 @@ export const q = {
   getCharacter: db.prepare('SELECT data FROM characters WHERE user_id = ?'),
   upsertCharacter: db.prepare(`INSERT INTO characters (user_id, data, updated_at) VALUES (?, ?, ?)
                                ON CONFLICT(user_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`),
+  insertReport: db.prepare('INSERT INTO reports (reporter_id, target_id, reason, evidence, created_at) VALUES (?, ?, ?, ?, ?)'),
+  recentReport: db.prepare('SELECT COUNT(*) AS n FROM reports WHERE reporter_id = ? AND target_id = ? AND created_at > ?'),
+  reportsBy: db.prepare('SELECT COUNT(*) AS n FROM reports WHERE reporter_id = ? AND created_at > ?'),
 };

@@ -46,9 +46,8 @@ export class Projectiles {
         for (const e of this.enemies.list) {
           if (e.state === 'dead') continue;
           if (Math.hypot(pos.x - e.pos.x, pos.z - e.pos.z) < e.def.radius + 0.45 && pos.y < e.def.height + 0.3) {
-            const { dmg, crit } = p.roll();
             const dir = new THREE.Vector3(p.vel.x, 0, p.vel.z).normalize();
-            this.onHit(this.enemies.damage(e, dmg, crit, dir, 0.4));
+            this.onHit(e, dir);
             done = true;
             break;
           }

@@ -41,7 +41,7 @@ export class UI {
   }
 
   setGame(g) { this.game = g; }
-  isBlocking() { return this.dialogOpen || this.modal !== null || this.chatOpen; }
+  isBlocking() { return this.dialogOpen || this.modal !== null || this.chatOpen || this.reportOpen; }
 
   // ---------- Conta / online ----------
   setAccount(name, online) {
@@ -55,15 +55,105 @@ export class UI {
   netStatus(text) { $('netstatus').innerHTML = text; }
 
   // ---------- Chat ----------
-  chatMsg(from, text, cls = '') {
+  chatMsg(from, text, cls = '', who = null) {
     const box = $('chatlog');
     const d = document.createElement('div');
     d.className = cls;
-    if (from) { const b = document.createElement('b'); b.textContent = `${from}: `; d.append(b); }
+    if (from) {
+      const b = document.createElement('b');
+      b.textContent = `${from}: `;
+      if (who) { // nome clicável: abre o menu (sussurrar / ignorar / denunciar)
+        b.className = 'pname';
+        b.title = `Opções para ${who}`;
+        b.onclick = (e) => { e.stopPropagation(); this.onPlayerMenu?.(who, e.clientX, e.clientY); };
+      }
+      d.append(b);
+    }
     d.append(document.createTextNode(text)); // textContent: nunca interpreta HTML vindo de outro jogador
     box.appendChild(d);
     while (box.children.length > 10) box.firstChild.remove();
     setTimeout(() => { d.style.opacity = 0; }, 12000);
+  }
+
+  /** Menu pequeno ao clicar no nome de um jogador. items: [{label, danger?, run}] */
+  playerMenu(name, x, y, items) {
+    this.closePlayerMenu();
+    const m = document.createElement('div');
+    m.id = 'pmenu';
+    const h = document.createElement('div');
+    h.className = 'pm-title'; h.textContent = name;
+    m.append(h);
+    for (const it of items) {
+      const b = document.createElement('button');
+      b.textContent = it.label;
+      if (it.danger) b.className = 'danger';
+      b.onclick = (e) => { e.stopPropagation(); this.closePlayerMenu(); it.run(); };
+      m.append(b);
+    }
+    document.body.append(m);
+    const r = m.getBoundingClientRect();
+    m.style.left = `${Math.min(x, innerWidth - r.width - 8)}px`;
+    m.style.top = `${Math.max(8, y - r.height - 6)}px`;
+    setTimeout(() => addEventListener('pointerdown', this._pmClose = (e) => { if (!m.contains(e.target)) this.closePlayerMenu(); }), 0);
+  }
+
+  closePlayerMenu() {
+    document.getElementById('pmenu')?.remove();
+    if (this._pmClose) { removeEventListener('pointerdown', this._pmClose); this._pmClose = null; }
+  }
+
+  /** Janela de denúncia. onSubmit({reason, note}) */
+  reportDialog(name, onSubmit) {
+    this.closePlayerMenu();
+    document.getElementById('report-bg')?.remove();
+    const REASONS = [
+      ['ofensa', 'Palavrões ou ofensas'], ['assedio', 'Assédio ou ameaça'], ['spam', 'Spam / propaganda'],
+      ['trapaca', 'Trapaça (hack)'], ['nome', 'Nome inadequado'], ['outro', 'Outro motivo'],
+    ];
+    const bg = document.createElement('div');
+    bg.id = 'report-bg';
+    const box = document.createElement('div');
+    box.id = 'report';
+    const h = document.createElement('h3');
+    h.textContent = `🚩 Denunciar ${name}`;
+    const p = document.createElement('p');
+    p.textContent = 'As últimas mensagens desse jogador são anexadas automaticamente. Denúncias falsas podem gerar punição.';
+    const list = document.createElement('div');
+    list.className = 'reasons';
+    for (const [id, label] of REASONS) {
+      const l = document.createElement('label');
+      const r = document.createElement('input');
+      r.type = 'radio'; r.name = 'reason'; r.value = id;
+      l.append(r, ` ${label}`);
+      list.append(l);
+    }
+    const note = document.createElement('textarea');
+    note.maxLength = 300; note.placeholder = 'Detalhes (opcional)';
+    const err = document.createElement('div');
+    err.className = 'err';
+    const row = document.createElement('div');
+    row.className = 'row';
+    const cancel = document.createElement('button');
+    cancel.textContent = 'Cancelar';
+    const send = document.createElement('button');
+    send.textContent = 'Enviar denúncia'; send.className = 'danger';
+    row.append(cancel, send);
+    box.append(h, p, list, note, err, row);
+    bg.append(box);
+    document.body.append(bg);
+    this.reportOpen = true;
+    this.input.keys.clear();
+    const close = () => { bg.remove(); this.reportOpen = false; };
+    cancel.onclick = close;
+    list.onchange = () => { err.textContent = ''; };
+    bg.onclick = (e) => { if (e.target === bg) close(); };
+    box.onkeydown = (e) => { if (e.key === 'Escape') close(); e.stopPropagation(); };
+    send.onclick = () => {
+      const reason = list.querySelector('input:checked')?.value;
+      if (!reason) { err.textContent = 'Escolha um motivo.'; return; }
+      onSubmit({ reason, note: note.value.trim() });
+      close();
+    };
   }
 
   openChat(onSend) {

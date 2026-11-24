@@ -2,6 +2,7 @@
 import { randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { q } from './db.js';
+import { badName } from './filter.js';
 
 const scrypt = promisify(scryptCb);
 const SESSION_DAYS = 30;
@@ -27,6 +28,7 @@ function validate(username, password) {
 
 export async function register(username, password) {
   validate(username, password);
+  if (badName(username)) throw new HttpError(400, 'Esse nome não é permitido. Escolha outro.');
   if (q.userByName.get(username)) throw new HttpError(409, 'Esse nome de usuário já existe.');
   const { hash, salt } = await hashPassword(password);
   const { lastInsertRowid } = q.insertUser.run(username, hash, salt, Date.now());

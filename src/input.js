@@ -58,7 +58,7 @@ export class Input {
     addEventListener('keydown', (e) => {
       if (this.capture) { e.preventDefault(); this.finishCapture(e.code); return; }
       // digitando em um campo de texto (chat, login): não é comando do jogo
-      if (e.target instanceof HTMLInputElement && e.target.type !== 'range' && e.target.type !== 'checkbox') return;
+      if ((e.target instanceof HTMLInputElement && e.target.type !== 'range' && e.target.type !== 'checkbox') || e.target instanceof HTMLTextAreaElement) return;
       if (e.code === 'Tab' || e.code === 'Space' || this.isBound(e.code)) e.preventDefault();
       if (!this.keys.has(e.code)) this.pressed.add(e.code);
       this.keys.add(e.code);

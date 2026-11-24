@@ -9,7 +9,9 @@
     "dev:server": "node --disable-warning=ExperimentalWarning --watch server/index.js",
     "build": "vite build",
     "start": "node --disable-warning=ExperimentalWarning server/index.js",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "denuncias": "node --disable-warning=ExperimentalWarning scripts/denuncias.js",
+    "test:mobs": "node scripts/test-mobs.mjs"
   },
   "engines": {
     "node": ">=22.13"
