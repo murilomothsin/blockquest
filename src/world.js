@@ -216,6 +216,30 @@ export function buildWorld(scene) {
   sign(19, 22, '↘ Campos do Leste');
   sign(3, -24, '↓ Ruínas Antigas');
 
+  // Limite do mapa: anel de montanhas/penhascos (o jogador é travado em WORLD_RADIUS)
+  for (let i = 0; i < 90; i++) {
+    const a = (i / 90) * Math.PI * 2 + rand() * 0.03;
+    const d = WORLD_RADIUS + 6 + rand() * 14;
+    const h = 14 + rand() * 26, w = 10 + rand() * 12;
+    const m = mesh(new THREE.BoxGeometry(w, h, w), [0x7d8a74, 0x8a8f84, 0x6f7d66][i % 3], Math.cos(a) * d, h / 2 - 1, Math.sin(a) * d);
+    m.rotation.y = rand() * Math.PI;
+    m.castShadow = false;
+    scene.add(m);
+    if (h > 24) { // pico nevado
+      const cap = mesh(new THREE.BoxGeometry(w * 0.7, 3, w * 0.7), 0xf2f4f5, m.position.x, h - 1 + 0.5, m.position.z);
+      cap.rotation.y = m.rotation.y; cap.castShadow = false;
+      scene.add(cap);
+    }
+  }
+  // rochas baixas marcando a borda caminhável
+  for (let i = 0; i < 120; i++) {
+    const a = (i / 120) * Math.PI * 2;
+    const s = 1.4 + rand() * 1.6;
+    const r = mesh(new THREE.DodecahedronGeometry(s, 0), 0x8d8d8d, Math.cos(a) * (WORLD_RADIUS + 2.5), s * 0.4, Math.sin(a) * (WORLD_RADIUS + 2.5));
+    r.rotation.set(rand(), rand(), rand());
+    scene.add(r);
+  }
+
   // Nuvens
   for (let i = 0; i < 25; i++) {
     const c = new THREE.Mesh(new THREE.BoxGeometry(8 + rand() * 10, 2, 5 + rand() * 6), new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 }));

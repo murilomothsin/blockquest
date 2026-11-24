@@ -27,7 +27,8 @@ export const TYPES = {
   },
 };
 
-const REGEN_DELAY = 6; // segundos sem levar dano antes de começar a regenerar
+const REGEN_DELAY = 12; // segundos sem levar dano antes de começar a regenerar
+const REGEN_RATE = 0.02; // fração da vida máxima por segundo (2%/s → ~50s pra encher)
 
 const SPAWNS = [
   { type: 'slime', x: -35, z: -35, r: 15, n: 8 },
@@ -370,7 +371,7 @@ export class EnemyManager {
 
       e.atkCd -= dt;
       if (e.state !== 'chase' && e.hp < def.hp && e.t - (e.lastHitT ?? -99) > REGEN_DELAY) {
-        e.hp = Math.min(def.hp, e.hp + def.hp * 0.2 * dt);
+        e.hp = Math.min(def.hp, e.hp + def.hp * REGEN_RATE * dt);
       }
       if (e.pendingHit > 0) {
         e.pendingHit -= dt;

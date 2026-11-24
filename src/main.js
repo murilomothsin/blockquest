@@ -114,7 +114,7 @@ function gainXp(n) {
     player.xp -= xpToNext(player.level);
     player.level++;
     player.maxHp += 15;
-    player.hp = player.maxHp;
+    player.hp += 15; // não cura: só ganha os 15 de vida máxima nova
     ui.float(headPos(player.pos, 3.8), 'LEVEL UP!', '#f5b82e', 30);
     ui.log(`Você subiu para o nível ${player.level}! Vida máxima: ${player.maxHp}`, 'good');
     sfx('levelUp');
@@ -388,6 +388,18 @@ function onPlayerHit(dmg, e) {
   }
 }
 
+// ---------- Poço da vila: única cura fora as poções ----------
+const WELL = { x: 0, z: 0, r: 3.4 };
+function drinkFromWell() {
+  if (player.hp >= player.maxHp) { sfx('deny'); return; }
+  const healed = Math.round(player.maxHp - player.hp);
+  player.hp = player.maxHp;
+  sfx('potion');
+  ui.float(headPos(player.pos), `+${healed}`, '#7dd8ff', 22);
+  ui.log('💧 Você bebeu a água do poço e recuperou toda a vida.', 'good');
+  save();
+}
+
 // ---------- Câmera ----------
 const cam = { yaw: 0, pitch: 0.38, dist: 13 };
 
@@ -457,12 +469,16 @@ function update(dt) {
     if (input.hit('bigPotion')) useItem('big_potion');
   }
 
-  // NPC próximo
+  // NPC próximo (ou o poço da vila, que cura)
   let near = null;
   for (const n of npcs) if (n.pos.distanceTo(player.pos) < 4) near = n;
+  const nearWell = !near && Math.hypot(player.pos.x - WELL.x, player.pos.z - WELL.z) < WELL.r;
   const talkKey = keyLabel(input.bindings.talk.find(Boolean));
-  ui.prompt(near && canAct ? `[${talkKey}] ${near.id === 'merchant' ? 'Abrir loja de' : 'Falar com'} ${near.name}` : null);
+  if (near && canAct) ui.prompt(`[${talkKey}] ${near.id === 'merchant' ? 'Abrir loja de' : 'Falar com'} ${near.name}`);
+  else if (nearWell && canAct) ui.prompt(player.hp < player.maxHp ? `[${talkKey}] Beber água do poço (recupera toda a vida)` : '💧 Poço da vila — sua vida está cheia');
+  else ui.prompt(null);
   if (near && canAct && input.hit('talk')) talk(near);
+  if (nearWell && canAct && input.hit('talk')) drinkFromWell();
 
   // física
   player.vy -= 28 * dt;
@@ -473,9 +489,7 @@ function update(dt) {
   player.attackCd -= dt;
   player.attackAnim = Math.max(0, player.attackAnim - dt * (weapon().style === 'ranged' ? 2.2 : 3.5));
 
-  if (!player.dead && t - player.lastHurt > 6 && player.hp < player.maxHp) {
-    player.hp = Math.min(player.maxHp, player.hp + player.maxHp * 0.03 * dt);
-  }
+  // sem regeneração passiva: vida só volta com poção ou bebendo no poço da vila
 
   // jogador visual
   hero.root.position.copy(player.pos);
