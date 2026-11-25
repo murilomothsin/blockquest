@@ -38,6 +38,7 @@
 
   <div id="account" class="hidden">
     <span id="netstatus"></span>
+    <button id="chpass" class="mini secondary" title="Trocar senha">🔑</button>
     <button id="logout" class="mini secondary">Sair</button>
   </div>
 
@@ -58,11 +59,27 @@
         <label>Usuário<input id="luser" autocomplete="username" maxlength="16" required /></label>
         <label>Senha<input id="lpass" type="password" autocomplete="current-password" maxlength="128" required /></label>
         <label id="lconfirm-row" class="hidden">Confirmar senha<input id="lconfirm" type="password" autocomplete="new-password" maxlength="128" /></label>
+        <label id="lage-row" class="check hidden"><input id="lage" type="checkbox" /> <span>Tenho <b data-minage>13</b> anos ou mais e li a <a href="/privacidade" target="_blank">política de privacidade</a>.</span></label>
         <div id="lerror"></div>
         <button id="lsubmit" type="submit">Entrar</button>
       </form>
       <button id="loffline" type="button" class="secondary">Jogar offline (sem conta)</button>
+      <p class="lage">🔞 Este jogo não é destinado a crianças: é proibido para menores de <b data-minage>13</b> anos. · <a href="/privacidade" target="_blank">Privacidade</a></p>
     </div>
+  </div>
+
+  <!-- troca de senha: obrigatória depois de uma senha temporária do admin, ou pelo botão 🔑 -->
+  <div id="pwbox" class="hidden">
+    <form class="lbox" id="pwform">
+      <h2>🔑 Trocar senha</h2>
+      <p id="pwinfo" class="lsub"></p>
+      <label>Senha atual<input id="pwold" type="password" autocomplete="current-password" maxlength="128" required /></label>
+      <label>Senha nova<input id="pwnew" type="password" autocomplete="new-password" maxlength="128" minlength="6" required /></label>
+      <label>Confirmar senha nova<input id="pwnew2" type="password" autocomplete="new-password" maxlength="128" required /></label>
+      <div id="pwerror" class="lerr"></div>
+      <button id="pwsubmit" type="submit">Salvar senha nova</button>
+      <button id="pwcancel" type="button" class="secondary">Cancelar</button>
+    </form>
   </div>
 
   <div id="dialog" class="hidden">

@@ -3,8 +3,8 @@
 import { readdir, readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { q } from './db.js';
-import { HttpError, userFromToken } from './auth.js';
-import { staffLog } from './moderation.js';
+import { HttpError, userFromToken, setTemporaryPassword } from './auth.js';
+import { staffLog, forget } from './moderation.js';
 import { bump, byPrefix, statsSnapshot, resetWorldStats, flushStats } from './stats.js';
 import { sanitizeAssets, PACK_CATEGORIES, PACK_ID_RE } from '../src/shared/assetConfig.js';
 import { sanitizeSettings, applySettings, SETTINGS, SETTING_DEFS } from '../src/shared/settings.js';
@@ -12,7 +12,7 @@ import { normalizeCharacter, publicCharacter, newCharacter, newStats } from '../
 import { ITEMS } from '../src/shared/items.js';
 import { TYPES } from '../src/shared/mobs.js';
 import { CLASSES } from '../src/shared/classes.js';
-import { can } from '../src/shared/roles.js';
+import { can, ROLES } from '../src/shared/roles.js';
 
 const CONFIRM = 'RESETAR';
 const actor = (u) => ({ id: u.id, name: u.username });
@@ -223,6 +223,32 @@ export function createAdmin({ root, players, broadcast, game }) {
     return { ok: true, message: msg };
   }
 
+  // ---------- contas (recuperar senha, excluir a pedido do jogador) ----------
+  const rank = (r) => ROLES[r]?.rank ?? 0;
+  async function account(user, { action, name, confirm } = {}) {
+    const u = findUser(name);
+    if (u.id === user.id) throw new HttpError(400, 'Para a sua própria conta, use "Trocar senha" no jogo.');
+    if (rank(u.role) >= rank(user.role)) throw new HttpError(403, `${u.username} é ${ROLES[u.role].label}: tire o cargo antes (/cargo).`);
+    const p = players.get(u.id);
+    const kick = (message) => { if (p) { try { p.ws.send(JSON.stringify({ t: 'kicked', message })); p.ws.close(4005, 'admin'); } catch { /* já saiu */ } } };
+    if (action === 'password') {
+      const password = await setTemporaryPassword(u.id);
+      kick('🔑 Sua senha foi redefinida pela administração. Entre com a senha temporária que você recebeu.');
+      staffLog(actor(user), 'painel: senha temporária', u.username); // a senha em si NÃO vai para o log
+      return { ok: true, password, message: `Senha temporária de ${u.username} criada. Ela vale até ele trocar (o jogo pede a troca no primeiro login).` };
+    }
+    if (action === 'delete') {
+      if (String(confirm ?? '').toLowerCase() !== u.username.toLowerCase()) throw new HttpError(400, `Para confirmar, digite o nome da conta (${u.username}).`);
+      if (p) { p.deleted = true; p.dirty = false; }
+      kick('Sua conta foi excluída.');
+      q.deleteUser.run(u.id); // apaga em cascata: personagem, sessões, mensagens do chat e denúncias
+      forget(u.id);
+      staffLog(actor(user), 'painel: conta excluída', u.username);
+      return { ok: true, message: `Conta ${u.username} excluída com o personagem, as mensagens e as denúncias.` };
+    }
+    throw new HttpError(400, 'Ação inválida.');
+  }
+
   // ---------- rotas ----------
   function requireAdmin(req) {
     const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || null;
@@ -247,6 +273,7 @@ export function createAdmin({ root, players, broadcast, game }) {
       case 'POST /api/admin/upload': sendJson(res, 200, await upload(user, await readJson(req, MAX_UPLOAD * 1.4 + 1000))); return true;
       case 'GET /api/admin/stats': sendJson(res, 200, stats()); return true;
       case 'POST /api/admin/reset': sendJson(res, 200, reset(user, await readJson(req))); return true;
+      case 'POST /api/admin/account': sendJson(res, 200, await account(user, await readJson(req))); return true;
       default: throw new HttpError(404, 'Rota não encontrada.');
     }
   }

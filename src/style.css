@@ -162,7 +162,16 @@ button.keycap-btn.listening { background: #f5b82e; animation: pulse .8s infinite
 #lform label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; }
 #lform input:not([type=checkbox]) { font: inherit; font-size: 15px; padding: 9px 11px; border-radius: 8px; border: 2px solid #3a4266; background: #0f1326; color: #fff; outline: none; user-select: text; }
 #lform input:focus { border-color: #f5b82e; }
-#lerror { color: #ff8b8b; font-size: 13px; min-height: 16px; }
+#lerror, .lerr { color: #ff8b8b; font-size: 13px; min-height: 16px; }
+.lbox a { color: #f5b82e; }
+.lage { margin: 4px 0 0; font-size: 12px; line-height: 1.4; text-align: center; opacity: .85; }
+#lform label.check { font-size: 12px; line-height: 1.35; }
+#lform label.check input { width: 18px; height: 18px; flex: none; }
+#pwbox { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(5,8,20,.75); z-index: 60; }
+#pwform h2 { margin: 0; text-align: center; color: #f5b82e; }
+#pwform label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+#pwform input { font: inherit; font-size: 15px; padding: 9px 11px; border-radius: 8px; border: 2px solid #3a4266; background: #0f1326; color: #fff; outline: none; user-select: text; }
+#pwform input:focus { border-color: #f5b82e; }
 #lsubmit { padding: 11px; font-size: 16px; }
 #loffline { margin-top: 4px; }
 

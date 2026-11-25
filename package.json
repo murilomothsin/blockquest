@@ -12,10 +12,12 @@
     "preview": "vite preview",
     "denuncias": "node --disable-warning=ExperimentalWarning scripts/denuncias.js",
     "cargo": "node --disable-warning=ExperimentalWarning scripts/cargo.js",
+    "senha": "node --disable-warning=ExperimentalWarning scripts/senha.mjs",
     "test:chat": "node scripts/test-chat.mjs",
     "test:server": "node --disable-warning=ExperimentalWarning scripts/test-server.mjs",
     "test:mina": "node --disable-warning=ExperimentalWarning scripts/test-mina.mjs",
     "test:admin": "node --disable-warning=ExperimentalWarning scripts/test-admin.mjs",
+    "test:contas": "node --disable-warning=ExperimentalWarning scripts/test-contas.mjs",
     "balance": "node scripts/balance.mjs",
     "dev:celular": "node scripts/dev.js --host --port 5199"
   },

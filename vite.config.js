@@ -7,14 +7,15 @@ const SERVER = `http://localhost:${process.env.SERVER_PORT || 3001}`;
 const adminRoute = {
   name: 'admin-route',
   configureServer(server) {
-    server.middlewares.use((req, _res, next) => { if (/^\/admin\/?(\?|$)/.test(req.url)) req.url = req.url.replace(/^\/admin\/?/, '/admin.html'); next(); });
+    server.middlewares.use((req, _res, next) => { if (/^\/admin\/?(\?|$)/.test(req.url)) req.url = req.url.replace(/^\/admin\/?/, '/admin.html');
+      else if (/^\/privacidade\/?(\?|$)/.test(req.url)) req.url = req.url.replace(/^\/privacidade\/?/, '/privacidade.html'); next(); });
   },
 };
 
 export default defineConfig({
   plugins: [adminRoute],
   // duas páginas: o jogo (index.html) e o painel admin (admin.html → /admin)
-  build: { rollupOptions: { input: { main: 'index.html', admin: 'admin.html' } } },
+  build: { rollupOptions: { input: { main: 'index.html', admin: 'admin.html', privacidade: 'privacidade.html' } } },
   server: {
     proxy: {
       '/api': SERVER,

@@ -20,7 +20,7 @@ async function api(path, body, token) {
   return { status: r.status, body: await r.json() };
 }
 async function account(name, role = 'player') {
-  let r = await api('register', { username: name, password: PASS });
+  let r = await api('register', { username: name, password: PASS, ageOk: true });
   if (r.status !== 201) r = await api('login', { username: name, password: PASS });
   if (!r.body.token) throw new Error(`login ${name}: ${JSON.stringify(r.body)}`);
   const u = q.userByName.get(name);

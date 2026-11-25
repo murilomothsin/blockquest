@@ -240,6 +240,16 @@ Para virar admin: crie a conta no jogo e rode `npm run cargo -- SEU_NOME admin` 
 Pacotes incluídos (todos **CC0**, uso comercial livre): Kenney Voxel Pack, Kenney Particle Pack, Kenney Foliage Sprites, 496 RPG Icons (7Soul1), 16×16 Block Texture Set e 16*16 Block Textures, Assorted Minecraft-style textures, 16 pixelated nature textures — fontes no `pack.json` de cada pasta.
 Configuração: `config` (SQLite) → `GET /api/config` (público) e mensagem `{t:'config'}` para quem está online. Rotas do painel: `/api/admin/*` (só admin). Teste: `npm run test:admin`.
 
+## Contas, idade e privacidade
+
+- **Idade mínima: 13 anos** (`MIN_AGE` em `src/shared/legal.js`). O jogo avisa na tela de login que não é para crianças, e criar conta exige marcar "Tenho 13 anos ou mais e li a política de privacidade" (o servidor também confere e grava a data em `users.age_ok_at`).
+- **Política de privacidade:** `/privacidade` (`privacidade.html`). O nome do responsável e o e-mail de contato vêm do painel admin → Regras do jogo (`responsavel`, `contato`); sem preencher, a página manda falar com um ADM no jogo.
+- **O que fica gravado:** conta (nome, hash da senha, datas, cargo/suspensão), personagem, **mensagens do chat** (texto original, inclusive sussurros, tabela `chat_log`), **denúncias** e **registros da equipe**. Os três últimos são apagados automaticamente depois de **90 dias** (`RETENTION_DAYS`; limpeza na inicialização e a cada hora). O IP só fica na memória (limite de tentativas de login).
+- **Esqueceu a senha:** painel admin → Contas e resets → *Gerar senha temporária* (mostra a senha uma vez só; derruba o jogador e as sessões dele). No primeiro login com ela o jogo obriga a criar uma senha nova. Se o próprio admin esquecer: `npm run senha -- NOME` no servidor.
+- **Trocar senha:** botão 🔑 ao lado de "Sair" no jogo (encerra as outras sessões da conta).
+- **Excluir conta** (pedido do jogador/LGPD ou conta de menor): painel → *Excluir conta*, digitando o nome para confirmar. Apaga personagem, sessões, mensagens e denúncias. Não funciona na própria conta nem em outros admins.
+- Teste: `npm run test:contas`.
+
 ## Sons
 
 Todos os sons são sintetizados com Web Audio (`src/audio.js`), com volume e pan pela posição. Para usar arquivos de verdade, coloque os áudios em `public/sounds/` e mapeie em `public/sounds/sounds.json`, por exemplo `{ "swing": "espada.mp3" }`. A lista de nomes está no próprio json.
@@ -263,6 +273,8 @@ scripts/
   balance.mjs    análise de balanceamento (números)
   bench-server.mjs  custo do tick do servidor com N jogadores
   test-admin.mjs painel admin: permissões, config, upload, estatísticas, resets
+  test-contas.mjs idade mínima, chat 90 dias, senha temporária, troca de senha, excluir conta, /privacidade
+  senha.mjs      npm run senha -- NOME: senha temporária pelo terminal
 src/
   shared/        código usado pelo navegador E pelo servidor:
     progress.js    regras do personagem: XP, ouro, loja, equipar, poções, missões, baús, casa, portas, classe, morte

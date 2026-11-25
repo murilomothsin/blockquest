@@ -98,6 +98,8 @@ td img.ico { width: 22px; height: 22px; image-rendering: pixelated; vertical-ali
 .on { color: var(--ok); }
 .role { font-size: 11px; padding: 1px 5px; border-radius: 4px; background: #333; }
 
+.pwshow { background: #10131a; border: 1px solid var(--ok); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.pwshow code { font-size: 20px; color: var(--ok); letter-spacing: 1px; user-select: all; }
 #toast { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); background: #26304a; border: 1px solid var(--line); padding: 10px 16px; border-radius: 10px; z-index: 30; }
 #toast.bad { background: #4a2020; }
 @media (max-width: 1000px) { .pane.visual { grid-template-columns: 1fr; height: auto; } .preview iframe { height: 60vh; } .grid2, .rules { grid-template-columns: 1fr; } }

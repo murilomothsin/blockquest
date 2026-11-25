@@ -13,7 +13,7 @@
       <button data-tab="visual" class="active">🎨 Visual</button>
       <button data-tab="regras">⚙️ Regras do jogo</button>
       <button data-tab="stats">📊 Estatísticas</button>
-      <button data-tab="reset">♻️ Resets</button>
+      <button data-tab="reset">👤 Contas e resets</button>
     </nav>
     <span id="who"></span>
   </header>
@@ -94,6 +94,18 @@
           </div>
           <p class="muted small">Mundo: todos os monstros renascem cheios no lugar de origem, baús de tesouro voltam para todo mundo. Nada disso tem desfazer.</p>
         </div>
+      </div>
+      <div class="card">
+        <h3>🔑 Conta do jogador (usa o nome digitado acima)</h3>
+        <div class="row wrap">
+          <button class="secondary" id="apass">Gerar senha temporária</button>
+          <button class="danger" id="adel">Excluir conta</button>
+        </div>
+        <div id="apwbox" class="hidden pwshow">Senha temporária de <b id="apwname"></b>: <code id="apw"></code> <button class="mini secondary" id="apwcopy">Copiar</button>
+          <div class="muted small">Passe para o jogador por um canal privado. Ela só aparece agora (não fica salva em lugar nenhum). No primeiro login o jogo pede uma senha nova.</div></div>
+        <p class="muted small">Senha temporária: para quem esqueceu a senha (confirme que é mesmo o dono da conta antes). Derruba o jogador se estiver online.
+          Excluir: pedido do jogador (LGPD) ou conta de menor de idade. Apaga personagem, mensagens do chat e denúncias. Não tem desfazer.
+          Não funciona na sua própria conta nem em outros admins. Se você (admin) esquecer a senha: <code>npm run senha -- SEU_NOME</code> no servidor.</p>
       </div>
       <div id="xmsg" class="card hidden"></div>
     </section>

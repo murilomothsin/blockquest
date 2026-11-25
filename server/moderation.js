@@ -14,6 +14,9 @@ const strikes = new Map(); // userId → [timestamps]
 
 export const historyOf = (id) => { if (!histories.has(id)) histories.set(id, []); return histories.get(id); };
 
+/** esquece tudo que está na memória sobre um jogador (conta excluída) */
+export function forget(id) { histories.delete(id); mutes.delete(id); strikes.delete(id); }
+
 export function mute(id, ms, reason = '', by = 'sistema') { mutes.set(id, { until: Date.now() + ms, reason, by }); }
 export function unmute(id) { return mutes.delete(id); }
 export function muteLeft(id) {
@@ -35,6 +38,8 @@ export function checkChat(p, raw, to = null) {
   const h = historyOf(p.id);
   h.push({ at: now, to, text: raw });
   if (h.length > HISTORY) h.shift();
+  // texto original no banco (apagado depois de RETENTION_DAYS, ver purgeOldRecords)
+  try { q.logChat.run(p.id, to, raw, now); } catch (e) { console.error('[chat] falhou ao gravar:', e.message); }
   const f = filterText(raw);
   let notice = null;
   if (f.hits) {

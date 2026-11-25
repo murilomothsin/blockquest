@@ -6,7 +6,7 @@ import { extname, join, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
-  HttpError, register, login, createSession, userFromToken, logout, loadCharacter, purgeExpiredSessions,
+  HttpError, register, login, createSession, userFromToken, logout, loadCharacter, purgeExpiredSessions, changePassword, purgeOldRecords,
 } from './auth.js';
 import { createGame } from './game.js';
 import { runCommand, CLOSE } from './commands.js';
@@ -57,8 +57,8 @@ async function handleApi(req, res, url) {
   switch (route) {
     case 'POST /api/register': {
       rateLimit(req);
-      const { username, password } = await readJson(req);
-      const user = await register(username, password);
+      const { username, password, ageOk } = await readJson(req);
+      const user = await register(username, password, ageOk);
       return sendJson(res, 201, { token: createSession(user.id), user, save: charFor(user.id) });
     }
     case 'POST /api/login': {
@@ -73,6 +73,15 @@ async function handleApi(req, res, url) {
       if (user.ban) throw new HttpError(403, user.ban);
       const { ban, ...pub } = user;
       return sendJson(res, 200, { user: pub, save: charFor(user.id) });
+    }
+    case 'POST /api/password': { // trocar a senha (também a temporária gerada pelo admin)
+      rateLimit(req);
+      const token = bearer(req);
+      const user = userFromToken(token);
+      if (!user) throw new HttpError(401, 'Sessão expirada. Entre de novo.');
+      const { old, password } = await readJson(req);
+      await changePassword(user.id, token, old, password);
+      return sendJson(res, 200, { ok: true });
     }
     case 'POST /api/logout': {
       logout(bearer(req));
@@ -89,6 +98,7 @@ const PACKS = join(ROOT, 'public', 'packs');
 async function serveStatic(req, res, url) {
   let path = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, '');
   if (path === '/admin' || path === '/admin/') path = '/admin.html';
+  if (path === '/privacidade' || path === '/privacidade/') path = '/privacidade.html';
   // pacotes de assets: direto de public/packs (o que o admin envia aparece na hora, sem rebuild)
   if (path.startsWith('/packs/')) {
     const f = join(PACKS, path.slice(7));
@@ -271,8 +281,9 @@ setInterval(() => {
 setInterval(() => {
   for (const ws of wss.clients) { if (!ws.isAlive) { ws.terminate(); continue; } ws.isAlive = false; ws.ping(); }
 }, 30_000);
-setInterval(purgeExpiredSessions, 60 * 60_000);
+setInterval(() => { purgeExpiredSessions(); purgeOldRecords(); }, 60 * 60_000);
 purgeExpiredSessions();
+purgeOldRecords();
 
 // salva todo mundo antes de desligar (inclusive no restart do --watch)
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { game.stop(); flushStats(); process.exit(0); });

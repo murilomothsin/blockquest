@@ -17,7 +17,7 @@ async function api(path, body) {
   return { status: r.status, body: await r.json() };
 }
 async function account(name, char) {
-  let r = await api('register', { username: name, password: PASS });
+  let r = await api('register', { username: name, password: PASS, ageOk: true });
   if (r.status !== 201) r = await api('login', { username: name, password: PASS });
   const u = q.userByName.get(name);
   q.setRole.run('player', u.id);

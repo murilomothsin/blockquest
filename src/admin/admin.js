@@ -370,6 +370,30 @@ function setupResets() {
       } catch (e) { toast(e.message, true); }
     };
   }
+  $('apass').onclick = async () => {
+    const name = $('xname').value.trim();
+    if (!name) return toast('Digite o nome do jogador.', true);
+    if (!confirm(`Gerar uma senha temporária para ${name}? A senha atual dele deixa de funcionar.`)) return;
+    try {
+      const r = await api('/admin/account', { action: 'password', name });
+      $('apwname').textContent = name; $('apw').textContent = r.password;
+      $('apwbox').classList.remove('hidden');
+      toast(r.message);
+    } catch (e) { toast(e.message, true); }
+  };
+  $('apwcopy').onclick = () => navigator.clipboard?.writeText($('apw').textContent).then(() => toast('Copiada.'), () => toast('Selecione e copie manualmente.', true));
+  $('adel').onclick = async () => {
+    const name = $('xname').value.trim();
+    if (!name) return toast('Digite o nome do jogador.', true);
+    const typed = prompt(`Excluir a conta ${name} para sempre (personagem, mensagens e denúncias)?\nPara confirmar, digite o nome da conta:`);
+    if (typed == null) return;
+    try {
+      const r = await api('/admin/account', { action: 'delete', name, confirm: typed.trim() });
+      $('xmsg').classList.remove('hidden'); $('xmsg').textContent = `✅ ${r.message}`;
+      $('apwbox').classList.add('hidden');
+      toast(r.message);
+    } catch (e) { toast(e.message, true); }
+  };
   api('/admin/stats').then((st) => { $('xnames').replaceChildren(...st.ranking.map((r) => el('option', { value: r.name }))); }).catch(() => {});
 }
 

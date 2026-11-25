@@ -13,6 +13,8 @@ export const SETTING_DEFS = {
   deathStep: { label: 'Ouro perdido por morte (% a mais por morte)', min: 0, max: 50, step: 1, def: 10, int: true, hint: '10 = 10%, 20%, 30%... no período de 2 dias' },
   noviceLevel: { label: 'Proteção de novato até o nível', min: 0, max: 20, step: 1, def: 3, int: true, hint: 'até este nível morrer não tira os itens' },
   motd: { label: 'Mensagem ao entrar no jogo', text: true, max: 200, def: '' },
+  responsavel: { label: 'Responsável pelo jogo (página de privacidade)', text: true, max: 120, def: '', hint: 'seu nome ou o da empresa (controlador dos dados, LGPD)' },
+  contato: { label: 'E-mail de contato para privacidade', text: true, max: 120, def: '', hint: 'onde os jogadores pedem acesso ou exclusão dos dados' },
 };
 
 export const DEFAULT_SETTINGS = Object.fromEntries(Object.entries(SETTING_DEFS).map(([k, d]) => [k, d.def]));

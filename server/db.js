@@ -58,6 +58,17 @@ db.exec(`
     value       INTEGER NOT NULL
   );
 
+  -- mensagens do chat (texto original, inclusive sussurros), guardadas por RETENTION_DAYS para moderação
+  CREATE TABLE IF NOT EXISTS chat_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    to_name     TEXT,
+    text        TEXT NOT NULL,
+    created_at  INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS chat_log_at ON chat_log(created_at);
+  CREATE INDEX IF NOT EXISTS chat_log_user ON chat_log(user_id, created_at);
+
   -- tudo que a equipe faz (comandos de teste, punições, mudanças de cargo)
   CREATE TABLE IF NOT EXISTS staff_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,15 +87,27 @@ const userCols = cols('users');
 if (!userCols.includes('role')) db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'player'");
 if (!userCols.includes('banned_until')) db.exec('ALTER TABLE users ADD COLUMN banned_until INTEGER');
 if (!userCols.includes('ban_reason')) db.exec('ALTER TABLE users ADD COLUMN ban_reason TEXT');
+// quando a pessoa confirmou a idade mínima no cadastro; senha temporária (gerada pelo admin) obriga a trocar
+if (!userCols.includes('age_ok_at')) db.exec('ALTER TABLE users ADD COLUMN age_ok_at INTEGER');
+if (!userCols.includes('pass_temp')) db.exec('ALTER TABLE users ADD COLUMN pass_temp INTEGER NOT NULL DEFAULT 0');
 
 export const q = {
-  insertUser: db.prepare('INSERT INTO users (username, pass_hash, salt, created_at) VALUES (?, ?, ?, ?)'),
+  insertUser: db.prepare('INSERT INTO users (username, pass_hash, salt, created_at, age_ok_at) VALUES (?, ?, ?, ?, ?)'),
+  userById2: db.prepare('SELECT * FROM users WHERE id = ?'),
+  setPassword: db.prepare('UPDATE users SET pass_hash = ?, salt = ?, pass_temp = ? WHERE id = ?'),
+  deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
+  logChat: db.prepare('INSERT INTO chat_log (user_id, to_name, text, created_at) VALUES (?, ?, ?, ?)'),
+  chatOf: db.prepare('SELECT to_name, text, created_at FROM chat_log WHERE user_id = ? ORDER BY created_at DESC LIMIT ?'),
+  purgeChat: db.prepare('DELETE FROM chat_log WHERE created_at < ?'),
+  purgeReports: db.prepare('DELETE FROM reports WHERE created_at < ?'),
+  purgeStaffLog: db.prepare('DELETE FROM staff_log WHERE created_at < ?'),
   userByName: db.prepare('SELECT * FROM users WHERE username = ?'),
   touchLogin: db.prepare('UPDATE users SET last_login = ? WHERE id = ?'),
   insertSession: db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)'),
-  sessionUser: db.prepare(`SELECT u.id, u.username, u.role, u.banned_until, u.ban_reason FROM sessions s JOIN users u ON u.id = s.user_id
+  sessionUser: db.prepare(`SELECT u.id, u.username, u.role, u.banned_until, u.ban_reason, u.pass_temp FROM sessions s JOIN users u ON u.id = s.user_id
                            WHERE s.token = ? AND s.expires_at > ?`),
   deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
+  sessionsOf: db.prepare('SELECT token FROM sessions WHERE user_id = ?'),
   purgeSessions: db.prepare('DELETE FROM sessions WHERE expires_at <= ?'),
   getCharacter: db.prepare('SELECT data FROM characters WHERE user_id = ?'),
   upsertCharacter: db.prepare(`INSERT INTO characters (user_id, data, updated_at) VALUES (?, ?, ?)

@@ -95,6 +95,7 @@ export function createGame({ players, send }) {
 
   /** salvar nunca derruba o servidor (ex.: conta apagada com o jogador online → FOREIGN KEY) */
   function safeSave(p) {
+    if (p.deleted) return false; // conta excluída pelo admin
     try { saveCharacter(p.id, p.c); return true; } catch (e) { console.error(`[save] falhou para ${p.name || p.id}: ${e.message}`); return false; }
   }
   function saveAll(force = false) {

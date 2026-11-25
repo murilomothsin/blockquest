@@ -20,7 +20,7 @@ import { UI } from './ui.js';
 import { Projectiles } from './combat.js';
 import { Loot } from './loot.js';
 import { Sound } from './audio.js';
-import { startSession, logoutSession } from './net/session.js';
+import { startSession, logoutSession, changePasswordDialog } from './net/session.js';
 import { Net } from './net/net.js';
 import { RemotePlayers } from './net/remote.js';
 import { Bubbles } from './net/bubble.js';
@@ -767,6 +767,9 @@ if (session.online) {
     ui.netStatus('🟠 Reconectando…');
   });
   document.getElementById('logout').onclick = () => logoutSession(session.token);
+  document.getElementById('chpass').onclick = async () => {
+    if (await changePasswordDialog(session.token)) ui.log('🔑 Senha trocada. As outras sessões desta conta foram encerradas.', 'good');
+  };
 } else {
   ui.setAccount('Aventureiro (offline)', false);
 }
