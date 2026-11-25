@@ -1,4 +1,46 @@
+# dependências e build
 node_modules
 dist
-.DS_Store
+coverage
+
+# banco de dados (contas, hashes de senha, chat, denúncias) — NUNCA no git
 server/data
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+backups/
+
+# segredos e configuração do servidor (produção)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# logs
+*.log
+npm-debug.log*
+logs/
+
+# pacotes de assets: só os gratuitos (CC0) vão para o git.
+# O que for enviado pelo painel admin (ex.: pacotes comprados, cuja licença geralmente
+# proíbe redistribuir) fica fora do repositório por padrão.
+public/packs/*/*/
+!public/packs/textures/kenney-voxel/
+!public/packs/textures/blocos-16/
+!public/packs/textures/blocos-16-extra/
+!public/packs/textures/natureza-32/
+!public/packs/textures/variados-16/
+!public/packs/icons/rpg-496/
+!public/packs/icons/kenney-voxel-itens/
+!public/packs/particles/kenney/
+!public/packs/foliage/kenney-plano/
+!public/packs/foliage/kenney-sombreado/
+
+# sistema / editores
+.DS_Store
+.vscode/
+.idea/
+*.swp
